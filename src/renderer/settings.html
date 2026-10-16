@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Settings | Oni Browser</title>
+  <link rel="stylesheet" href="newtab.css">
+  <link rel="stylesheet" href="index.css">
+  <style>
+    body {
+      background: #090a0f;
+      display: block;
+      padding: 40px;
+      overflow-y: auto;
+    }
+    .settings-container {
+      max-width: 760px;
+      margin: 0 auto;
+      background: #11131c;
+      border: 1px solid rgba(0, 255, 136, 0.25);
+      border-radius: 16px;
+      padding: 32px;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7);
+    }
+    .settings-header {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      padding-bottom: 20px;
+      margin-bottom: 24px;
+    }
+    .settings-header img {
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+    }
+    .settings-header h1 {
+      font-size: 24px;
+      font-weight: 800;
+      color: #fff;
+    }
+    .settings-header h1 span {
+      color: #00ff88;
+    }
+  </style>
+</head>
+<body>
+  <div class="settings-container">
+    <div class="settings-header">
+      <img src="../../assets/app-icon.png" alt="Oni">
+      <div>
+        <h1>Oni <span>Preferences</span></h1>
+        <p style="font-size: 13px; color: var(--text-muted);">Customize your browser engine, privacy shield, and visual theme constructs.</p>
+      </div>
+    </div>
+
+    <!-- Themes Section -->
+    <div class="themes-section">
+      <div class="themes-section-header">
+        <div>
+          <div class="setting-label" style="margin-bottom: 2px;">Themes</div>
+          <div class="setting-desc" style="margin-bottom: 0;">A theme saves and controls the entire visual and functional constructs of Oni Browser (chrome layout, palette, typography, dashboard, and engine behavior).</div>
+        </div>
+      </div>
+
+      <div class="theme-list" id="page-theme-list">
+        <div class="theme-card active" data-theme-id="classic">
+          <div class="theme-card-top">
+            <div class="theme-card-title-row">
+              <span class="theme-card-name">Classic</span>
+              <span class="theme-badge">Active</span>
+            </div>
+            <div class="theme-swatches">
+              <span class="theme-swatch" style="background: #0a0b0f;"></span>
+              <span class="theme-swatch" style="background: #12141e;"></span>
+              <span class="theme-swatch" style="background: #00ff88;"></span>
+              <span class="theme-swatch" style="background: #00e5ff;"></span>
+            </div>
+          </div>
+          <div class="theme-card-desc">Original Oni Browser configuration — cyber-emerald accents, dark glassmorphic chrome, kanji clock dashboard, and active Oni Shield.</div>
+          <div class="theme-construct-tags">
+            <span class="theme-construct-tag">Chrome: top / pill</span>
+            <span class="theme-construct-tag">Dashboard: Kanji Clock</span>
+            <span class="theme-construct-tag">Engine: duckduckgo</span>
+            <span class="theme-construct-tag">Shield: Enabled</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="theme-save-row">
+        <input type="text" id="page-theme-name" class="setting-input" value="Classic" placeholder="Theme name (e.g. Classic)" style="flex: 1;">
+        <button id="page-btn-save-theme" class="btn-primary" style="white-space: nowrap;">Save Current Config</button>
+      </div>
+      <div id="page-theme-status" class="theme-status-msg hidden"></div>
+    </div>
+
+    <div class="setting-group">
+      <div class="setting-label">Default Search Engine</div>
+      <div class="setting-desc">Sets default search provider for omnibox queries.</div>
+      <select id="setting-engine" class="setting-select">
+        <option value="duckduckgo">DuckDuckGo (Privacy)</option>
+        <option value="google">Google</option>
+        <option value="brave">Brave Search</option>
+        <option value="bing">Microsoft Bing</option>
+      </select>
+    </div>
+
+    <div class="setting-group">
+      <div class="setting-label">Bookmarks Bar</div>
+      <div class="setting-desc">Always show bookmarks bar under the navigation toolbar.</div>
+      <label class="switch">
+        <input type="checkbox" id="setting-bm-bar" checked>
+        <span class="slider round"></span>
+      </label>
+    </div>
+
+    <div class="setting-group">
+      <div class="setting-label">Oni Shield Telemetry & Ad Blocking</div>
+      <div class="setting-desc">Block malicious trackers, data mining, and intrusive advertisements.</div>
+      <label class="switch">
+        <input type="checkbox" id="setting-shield" checked>
+        <span class="slider round"></span>
+      </label>
+    </div>
+
+    <div class="setting-group" style="padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.06);">
+      <div class="setting-label">System & Hardware Acceleration</div>
+      <div class="setting-desc">Accelerate web rendering with GPU rasterization when available.</div>
+      <label class="switch">
+        <input type="checkbox" checked disabled>
+        <span class="slider round"></span>
+      </label>
+    </div>
+
+    <div class="setting-group" style="margin-top: 30px; padding: 20px; background: rgba(0,255,136,0.06); border: 1px solid rgba(0,255,136,0.2); border-radius: 12px;">
+      <div style="font-weight: 700; color: #fff; margin-bottom: 4px;">Oni Browser v1.0.0 (Windows Standalone x64)</div>
+      <div style="font-size: 12px; color: var(--text-muted);">Engine: Chromium & Electron 44 • Standalone Portable Edition</div>
+    </div>
+  </div>
+
+  <script>
+    (async function () {
+      if (!window.oniAPI) return;
+
+      const themeListEl = document.getElementById('page-theme-list');
+      const themeNameInput = document.getElementById('page-theme-name');
+      const btnSaveTheme = document.getElementById('page-btn-save-theme');
+      const statusEl = document.getElementById('page-theme-status');
+      const engineSelect = document.getElementById('setting-engine');
+      const bmBarToggle = document.getElementById('setting-bm-bar');
+      const shieldToggle = document.getElementById('setting-shield');
+
+      async function loadPageSettings() {
+        const [settings, themes, activeTheme] = await Promise.all([
+          window.oniAPI.getSettings(),
+          window.oniAPI.getThemes(),
+          window.oniAPI.getActiveTheme()
+        ]);
+
+        const activeId = (activeTheme && activeTheme.id) || settings.activeThemeId || 'classic';
+        themeNameInput.value = (activeTheme && activeTheme.name) || 'Classic';
+        engineSelect.value = settings.searchEngine || 'duckduckgo';
+        bmBarToggle.checked = settings.showBookmarksBar !== false;
+        shieldToggle.checked = settings.adBlockEnabled !== false;
+
+        themeListEl.innerHTML = (themes || []).map(t => {
+          const isActive = t.id === activeId;
+          const vars = (t.chrome && t.chrome.cssVariables) || {};
+          const bgMain = vars['--bg-main'] || '#0a0b0f';
+          const bgToolbar = vars['--bg-toolbar'] || '#12141e';
+          const accentGreen = vars['--accent-green'] || '#00ff88';
+          const accentCyan = vars['--accent-cyan'] || '#00e5ff';
+          const layout = (t.chrome && t.chrome.layout) || {};
+          const behavior = t.behavior || {};
+
+          return `
+            <div class="theme-card ${isActive ? 'active' : ''}" data-theme-id="${t.id}">
+              <div class="theme-card-top">
+                <div class="theme-card-title-row">
+                  <span class="theme-card-name">${t.name}</span>
+                  ${isActive ? '<span class="theme-badge">Active</span>' : ''}
+                </div>
+                <div class="theme-swatches">
+                  <span class="theme-swatch" style="background: ${bgMain};"></span>
+                  <span class="theme-swatch" style="background: ${bgToolbar};"></span>
+                  <span class="theme-swatch" style="background: ${accentGreen};"></span>
+                  <span class="theme-swatch" style="background: ${accentCyan};"></span>
+                </div>
+              </div>
+              <div class="theme-card-desc">${t.description || 'Complete visual and functional browser construct.'}</div>
+              <div class="theme-construct-tags">
+                <span class="theme-construct-tag">Chrome: ${layout.tabBarPosition || 'top'} / ${layout.omniboxStyle || 'pill'}</span>
+                <span class="theme-construct-tag">Home: ${t.newTab && t.newTab.layoutMode === 'desktop' ? 'OS Desktop + App Dock' : (t.newTab && t.newTab.clock && t.newTab.clock.showKanjiDate ? 'Kanji Clock Dashboard' : 'Standard')}</span>
+                <span class="theme-construct-tag">Engine: ${behavior.searchEngine || 'duckduckgo'}</span>
+                <span class="theme-construct-tag">Shield: ${behavior.adBlockEnabled !== false ? 'Enabled' : 'Off'}</span>
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        themeListEl.querySelectorAll('.theme-card').forEach(card => {
+          card.addEventListener('click', async () => {
+            await window.oniAPI.applyTheme(card.dataset.themeId);
+            await loadPageSettings();
+          });
+        });
+      }
+
+      btnSaveTheme.addEventListener('click', async () => {
+        const name = (themeNameInput.value || 'Classic').trim() || 'Classic';
+        const id = name.toLowerCase() === 'classic' ? 'classic' : undefined;
+        const res = await window.oniAPI.saveTheme({ id, name });
+        await loadPageSettings();
+        if (res && res.theme) {
+          statusEl.textContent = `Saved current browser configuration to "${res.theme.name}" theme.`;
+          statusEl.classList.remove('hidden');
+        }
+      });
+
+      engineSelect.addEventListener('change', (e) => {
+        window.oniAPI.updateSettings({ searchEngine: e.target.value });
+      });
+
+      bmBarToggle.addEventListener('change', (e) => {
+        window.oniAPI.updateSettings({ showBookmarksBar: e.target.checked });
+      });
+
+      shieldToggle.addEventListener('change', (e) => {
+        window.oniAPI.updateSettings({ adBlockEnabled: e.target.checked });
+        window.oniAPI.toggleShield(e.target.checked);
+      });
+
+      await loadPageSettings();
+    })();
+  </script>
+</body>
+</html>

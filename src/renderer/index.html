@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Oni Browser</title>
+  <link rel="stylesheet" href="index.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body class="theme-classic" data-theme="classic">
+  <div id="browser-chrome">
+    <!-- Oni OS Top System Menu Bar (Only visible in Oni OS theme) -->
+    <header id="os-menubar" class="os-menubar hidden">
+      <div class="os-menubar-left">
+        <div class="os-brand-emblem" aria-hidden="true">
+          <img src="../../assets/app-icon.png" alt="Oni" class="brand-icon">
+          <span class="brand-text">ONI</span>
+        </div>
+        <span class="os-menu-item" id="os-menu-desktop">Home</span>
+        <span class="os-menu-item" id="os-menu-spotlight">Search</span>
+        <span class="os-menu-item" id="os-menu-history">History</span>
+        <span class="os-menu-item" id="os-menu-settings">Settings</span>
+      </div>
+
+      <div class="os-menubar-right">
+        <div id="os-window-controls" class="os-menubar-win-controls">
+          <button id="os-win-min" class="os-top-win-btn" title="Minimize" aria-label="Minimize">
+            <svg viewBox="0 0 10 10" width="10" height="10">
+              <line x1="1" y1="5" x2="9" y2="5" stroke="currentColor" stroke-width="1.2" />
+            </svg>
+          </button>
+          <button id="os-win-max" class="os-top-win-btn" title="Maximize" aria-label="Maximize">
+            <svg id="os-icon-max" viewBox="0 0 10 10" width="10" height="10">
+              <rect x="1.5" y="1.5" width="7" height="7" fill="none" stroke="currentColor" stroke-width="1.2" />
+            </svg>
+            <svg id="os-icon-restore" class="hidden" viewBox="0 0 10 10" width="10" height="10">
+              <rect x="1.5" y="3.5" width="5" height="5" fill="none" stroke="currentColor" stroke-width="1.2" />
+              <polyline points="3.5,3.5 3.5,1.5 8.5,1.5 8.5,6.5 6.5,6.5" fill="none" stroke="currentColor" stroke-width="1.2" />
+            </svg>
+          </button>
+          <button id="os-win-close" class="os-top-win-btn close" title="Close" aria-label="Close">
+            <svg viewBox="0 0 10 10" width="10" height="10">
+              <line x1="2" y1="2" x2="8" y2="8" stroke="currentColor" stroke-width="1.2" />
+              <line x1="8" y1="2" x2="2" y2="8" stroke="currentColor" stroke-width="1.2" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Top Window Titlebar & Tab Strip -->
+    <header id="titlebar">
+      <!-- Oni Logo Branding -->
+      <div id="brand-emblem" title="Oni Browser">
+        <img src="../../assets/app-icon.png" alt="Oni" class="brand-icon">
+        <span class="brand-text">ONI</span>
+      </div>
+
+      <!-- Tab Strip -->
+      <nav id="tabs-container" aria-label="Browser tabs">
+        <div id="tabs-list">
+          <!-- Dynamically populated tabs -->
+        </div>
+        <button id="btn-new-tab" title="New Tab (Ctrl+T)" aria-label="New tab">
+          <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2.5" fill="none">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+        </button>
+      </nav>
+
+      <!-- Window Chrome Controls (Windows style) -->
+      <div id="window-controls">
+        <button id="win-min" class="win-btn" title="Minimize" aria-label="Minimize">
+          <svg viewBox="0 0 10 10" width="10" height="10">
+            <line x1="1" y1="5" x2="9" y2="5" stroke="currentColor" stroke-width="1.2" />
+          </svg>
+        </button>
+        <button id="win-max" class="win-btn" title="Maximize" aria-label="Maximize">
+          <svg id="icon-max" viewBox="0 0 10 10" width="10" height="10">
+            <rect x="1.5" y="1.5" width="7" height="7" fill="none" stroke="currentColor" stroke-width="1.2" />
+          </svg>
+          <svg id="icon-restore" class="hidden" viewBox="0 0 10 10" width="10" height="10">
+            <rect x="1.5" y="3.5" width="5" height="5" fill="none" stroke="currentColor" stroke-width="1.2" />
+            <polyline points="3.5,3.5 3.5,1.5 8.5,1.5 8.5,6.5 6.5,6.5" fill="none" stroke="currentColor" stroke-width="1.2" />
+          </svg>
+        </button>
+        <button id="win-close" class="win-btn close" title="Close" aria-label="Close">
+          <svg viewBox="0 0 10 10" width="10" height="10">
+            <line x1="2" y1="2" x2="8" y2="8" stroke="currentColor" stroke-width="1.2" />
+            <line x1="8" y1="2" x2="2" y2="8" stroke="currentColor" stroke-width="1.2" />
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Navigation & Omnibox Toolbar -->
+    <div id="toolbar">
+      <!-- Navigation Buttons -->
+      <div class="nav-controls">
+        <button id="btn-back" class="toolbar-btn" title="Click to go back (Alt+Left)" disabled>
+          <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none">
+            <polyline points="15 18 9 12 15 6"></polyline>
+          </svg>
+        </button>
+        <button id="btn-forward" class="toolbar-btn" title="Click to go forward (Alt+Right)" disabled>
+          <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none">
+            <polyline points="9 18 15 12 9 6"></polyline>
+          </svg>
+        </button>
+        <button id="btn-reload" class="toolbar-btn" title="Reload this page (Ctrl+R)">
+          <svg id="icon-reload" viewBox="0 0 24 24" width="17" height="17" stroke="currentColor" stroke-width="2.2" fill="none">
+            <path d="M23 4v6h-6"></path>
+            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+          </svg>
+          <svg id="icon-stop" class="hidden" viewBox="0 0 24 24" width="17" height="17" stroke="currentColor" stroke-width="2.2" fill="none">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+        <button id="btn-home" class="toolbar-btn" title="Open Homepage (Alt+Home)">
+          <svg viewBox="0 0 24 24" width="17" height="17" stroke="currentColor" stroke-width="2" fill="none">
+            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+            <polyline points="9 22 9 12 15 12 15 22"></polyline>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Omnibox (Address & Search Bar) -->
+      <div id="omnibox-wrapper">
+        <div id="security-indicator" class="secure" title="Secure Connection">
+          <svg id="icon-lock" viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+          </svg>
+          <svg id="icon-shield-mini" viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" class="hidden">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+          </svg>
+        </div>
+
+        <input type="text" id="omnibox-input" placeholder="Search the web or enter address..." spellcheck="false" autocomplete="off">
+
+        <div class="omnibox-actions">
+          <button id="btn-zoom-pill" class="pill-btn hidden" title="Reset Zoom">
+            <span id="zoom-text">100%</span>
+          </button>
+          <button id="btn-star" class="action-btn" title="Pin App (Ctrl+D)">
+            <svg id="icon-star" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none">
+              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Quick Action Tools -->
+      <div class="action-tools">
+        <!-- Oni Shield Toggle -->
+        <button id="btn-shield" class="toolbar-btn shield-active" title="Oni Privacy Shield">
+          <svg viewBox="0 0 24 24" width="17" height="17" stroke="currentColor" stroke-width="2" fill="none">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+          </svg>
+          <span id="shield-count-badge" class="badge">0</span>
+        </button>
+
+        <!-- Pinned Apps dropdown -->
+        <button id="btn-bookmarks-panel" class="toolbar-btn" title="Pinned Apps (Ctrl+B)">
+          <svg viewBox="0 0 24 24" width="17" height="17" stroke="currentColor" stroke-width="2" fill="none">
+            <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
+          </svg>
+        </button>
+
+        <!-- Downloads flyout -->
+        <button id="btn-downloads" class="toolbar-btn" title="Downloads (Ctrl+J)">
+          <svg viewBox="0 0 24 24" width="17" height="17" stroke="currentColor" stroke-width="2" fill="none">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          <span id="downloads-badge" class="badge hidden">0</span>
+        </button>
+
+        <!-- History -->
+        <button id="btn-history" class="toolbar-btn" title="History (Ctrl+H)">
+          <svg viewBox="0 0 24 24" width="17" height="17" stroke="currentColor" stroke-width="2" fill="none">
+            <circle cx="12" cy="12" r="10"></circle>
+            <polyline points="12 6 12 12 16 14"></polyline>
+          </svg>
+        </button>
+
+        <!-- Find in Page -->
+        <button id="btn-find" class="toolbar-btn" title="Find in page (Ctrl+F)">
+          <svg viewBox="0 0 24 24" width="17" height="17" stroke="currentColor" stroke-width="2" fill="none">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+        </button>
+
+        <!-- DevTools -->
+        <button id="btn-devtools" class="toolbar-btn" title="Toggle Developer Tools (F12)">
+          <svg viewBox="0 0 24 24" width="17" height="17" stroke="currentColor" stroke-width="2" fill="none">
+            <polyline points="16 18 22 12 16 6"></polyline>
+            <polyline points="8 6 2 12 8 18"></polyline>
+          </svg>
+        </button>
+
+        <!-- Settings -->
+        <button id="btn-settings" class="toolbar-btn" title="Settings">
+          <svg viewBox="0 0 24 24" width="17" height="17" stroke="currentColor" stroke-width="2" fill="none">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Quick Bookmarks Bar -->
+    <div id="bookmarks-bar">
+      <div id="bookmarks-bar-list">
+        <!-- Rendered quick bookmark chips -->
+      </div>
+    </div>
+
+    <!-- Find in Page Floating Bar -->
+    <div id="find-bar" class="hidden">
+      <input type="text" id="find-input" placeholder="Find in page...">
+      <span id="find-count">0 of 0</span>
+      <button id="find-prev" title="Previous match (Shift+Enter)">▲</button>
+      <button id="find-next" title="Next match (Enter)">▼</button>
+      <button id="find-close" title="Close (Esc)">✕</button>
+    </div>
+  </div>
+
+  <!-- Flyouts & Overlays -->
+  <!-- Oni Shield Flyout -->
+  <div id="shield-flyout" class="flyout hidden">
+    <div class="flyout-header">
+      <div class="flyout-title">
+        <svg viewBox="0 0 24 24" width="18" height="18" stroke="#00ff88" stroke-width="2" fill="none">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+        </svg>
+        <span>Oni Shield Protection</span>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="shield-toggle" checked>
+        <span class="slider round"></span>
+      </label>
+    </div>
+    <div class="flyout-body">
+      <div class="shield-stat-card">
+        <div class="stat-number" id="flyout-total-blocked">0</div>
+        <div class="stat-label">Trackers & Ads Neutralized</div>
+      </div>
+      <div class="shield-features">
+        <div class="feature-item">
+          <span class="dot active"></span>
+          <span>Malicious Tracker Neutralizer</span>
+        </div>
+        <div class="feature-item">
+          <span class="dot active"></span>
+          <span>Aggressive Ad Blocker</span>
+        </div>
+        <div class="feature-item">
+          <span class="dot active"></span>
+          <span>Strict Anti-Fingerprinting</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Downloads Flyout -->
+  <div id="downloads-flyout" class="flyout hidden">
+    <div class="flyout-header">
+      <div class="flyout-title">
+        <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+          <polyline points="7 10 12 15 17 10"></polyline>
+          <line x1="12" y1="15" x2="12" y2="3"></line>
+        </svg>
+        <span>Downloads</span>
+      </div>
+      <button id="btn-clear-downloads" class="text-btn">Clear list</button>
+    </div>
+    <div id="downloads-list" class="flyout-list">
+      <div class="empty-state">No recent downloads</div>
+    </div>
+  </div>
+
+  <!-- Full-Screen Interactive Overlays (Settings, History, Bookmarks) -->
+  <div id="overlay-container" class="hidden">
+    <div class="overlay-backdrop" id="overlay-backdrop"></div>
+    <div class="overlay-modal" id="overlay-modal">
+      <div class="modal-header">
+        <h2 id="modal-title">Settings</h2>
+        <button id="modal-close" class="modal-close-btn">✕</button>
+      </div>
+      <div class="modal-content" id="modal-content">
+        <!-- Injected via JavaScript based on active modal -->
+      </div>
+    </div>
+  </div>
+
+  <script src="index.js"></script>
+</body>
+</html>

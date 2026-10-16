@@ -1,0 +1,54 @@
+{
+  "name": "oni-browser",
+  "version": "1.0.0",
+  "description": "Oni Browser - Sleek, fierce, uncompromised web browser for Windows.",
+  "main": "src/main/index.js",
+  "author": "Oni Lab",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "make-ico": "electron scripts/make-ico.js",
+    "build:portable": "electron-builder --win portable",
+    "build:installer": "electron-builder --win nsis",
+    "build": "electron-builder --win portable"
+  },
+  "build": {
+    "appId": "com.onilab.onibrowser",
+    "productName": "Oni Browser",
+    "copyright": "Copyright © 2026 Oni Lab",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "win": {
+      "icon": "assets/icon.ico",
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "portable": {
+      "artifactName": "Oni Browser Standalone.exe"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Oni Browser"
+    }
+  },
+  "devDependencies": {
+    "electron": "^44.7.2",
+    "electron-builder": "^26.15.3",
+    "png-to-ico": "^3.0.2"
+  }
+}

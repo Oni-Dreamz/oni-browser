@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Bookmarks | Oni Browser</title>
+  <link rel="stylesheet" href="newtab.css">
+  <link rel="stylesheet" href="index.css">
+  <style>
+    body {
+      background: #090a0f;
+      display: block;
+      padding: 40px;
+      overflow-y: auto;
+    }
+    .page-container {
+      max-width: 800px;
+      margin: 0 auto;
+      background: #11131c;
+      border: 1px solid rgba(0, 255, 136, 0.25);
+      border-radius: 16px;
+      padding: 32px;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7);
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      padding-bottom: 20px;
+      margin-bottom: 24px;
+    }
+    .header h1 {
+      font-size: 24px;
+      font-weight: 800;
+      color: #fff;
+    }
+    .header h1 span {
+      color: #00ff88;
+    }
+  </style>
+</head>
+<body>
+  <div class="page-container">
+    <div class="header">
+      <div>
+        <h1>Oni <span>Bookmarks</span></h1>
+        <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Organize and quickly launch your favorite websites.</p>
+      </div>
+      <button class="btn-primary" onclick="window.history.back()">Back</button>
+    </div>
+    <div style="display:flex; flex-direction:column; gap:10px;">
+      <p style="color:var(--text-muted); font-size:13px;">Manage bookmarks via the Star (★) button in the omnibar or through the Bookmarks quick panel.</p>
+    </div>
+  </div>
+</body>
+</html>

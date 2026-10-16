@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Oni OS Dock</title>
+  <link rel="stylesheet" href="dock.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="dock-viewport" id="dock-viewport">
+    <!-- Floating OS Windows Layer (Retained through webpage changes) -->
+    <div class="os-windows-layer" id="os-windows-layer">
+      <!-- Floating Window 1: Search -->
+      <div class="os-window hidden" id="os-win-spotlight" style="top: 14%; left: 50%; transform: translateX(-50%); width: 560px;">
+        <div class="os-window-titlebar" data-drag-window="os-win-spotlight">
+          <div class="os-window-title">
+            <span class="os-win-dot"></span>
+            <span>Oni OS Search</span>
+          </div>
+          <div class="os-window-controls">
+            <button class="os-win-btn close" data-close-window="os-win-spotlight" type="button" title="Close">✕</button>
+          </div>
+        </div>
+        <div class="os-window-body">
+          <form id="os-spotlight-form" class="os-spotlight-input-wrap">
+            <svg viewBox="0 0 24 24" width="18" height="18" stroke="#00ff88" stroke-width="2.5" fill="none">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            <input type="text" id="os-spotlight-input" placeholder="Type a URL, search query, or filter pinned apps..." autocomplete="off" spellcheck="false">
+            <button type="submit" class="os-btn-primary">Launch</button>
+          </form>
+          <div class="os-spotlight-results" id="os-spotlight-results">
+            <!-- Populated dynamically -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Floating Window 2: Oni OS Settings & Themes -->
+      <div class="os-window hidden" id="os-win-settings" style="top: 12%; left: 24%; width: 520px;">
+        <div class="os-window-titlebar" data-drag-window="os-win-settings">
+          <div class="os-window-title">
+            <span class="os-win-dot"></span>
+            <span>Oni OS Settings</span>
+          </div>
+          <div class="os-window-controls">
+            <button class="os-win-btn close" data-close-window="os-win-settings" type="button" title="Close">✕</button>
+          </div>
+        </div>
+        <div class="os-window-body" id="os-win-settings-body">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+
+      <!-- Floating Window 4: Oni OS History -->
+      <div class="os-window hidden" id="os-win-history" style="top: 16%; left: 28%; width: 540px;">
+        <div class="os-window-titlebar" data-drag-window="os-win-history">
+          <div class="os-window-title">
+            <span class="os-win-dot"></span>
+            <span>Oni OS History</span>
+          </div>
+          <div class="os-window-controls">
+            <button class="os-win-btn close" data-close-window="os-win-history" type="button" title="Close">✕</button>
+          </div>
+        </div>
+        <div class="os-window-body" id="os-win-history-body">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+
+      <!-- Floating Window 5: Pin New Desktop App -->
+      <div class="os-window hidden" id="os-win-add-app" style="top: 20%; left: 32%; width: 440px;">
+        <div class="os-window-titlebar" data-drag-window="os-win-add-app">
+          <div class="os-window-title">
+            <span class="os-win-dot"></span>
+            <span>Pin New Home Application</span>
+          </div>
+          <div class="os-window-controls">
+            <button class="os-win-btn close" data-close-window="os-win-add-app" type="button" title="Close">✕</button>
+          </div>
+        </div>
+        <div class="os-window-body">
+          <form id="os-add-app-form" class="os-form-stack">
+            <div>
+              <label class="os-field-label">Application Title</label>
+              <input type="text" id="os-app-title" class="os-field-input" placeholder="e.g. GitHub, Discord, Gmail" required>
+            </div>
+            <div>
+              <label class="os-field-label">Target URL</label>
+              <input type="text" id="os-app-url" class="os-field-input" placeholder="e.g. https://discord.com" required>
+            </div>
+            <div>
+              <label class="os-field-label">Custom Icon URL (Optional)</label>
+              <input type="text" id="os-app-icon" class="os-field-input" placeholder="Leave blank for automatic favicon">
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:8px;">
+              <button type="button" class="os-btn-ghost" data-close-window="os-win-add-app">Cancel</button>
+              <button type="submit" class="os-btn-primary">Add to Home</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- Always-on-Top Oni OS Start Menu Overlay -->
+    <div class="os-start-menu hidden" id="os-start-menu">
+      <div class="os-start-header">
+        <div class="os-user-profile">
+          <img src="../../assets/app-icon.png" alt="User">
+          <div>
+            <div class="os-user-name">Hunter // Root</div>
+            <div class="os-user-role">Oni OS Environment</div>
+          </div>
+        </div>
+        <span class="os-kernel-badge">ONLINE</span>
+      </div>
+
+      <div class="os-start-section-title">Pinned Applications</div>
+      <div class="os-start-apps-grid" id="os-start-apps-grid">
+        <!-- Populated dynamically -->
+      </div>
+
+      <div class="os-start-footer">
+        <button class="os-start-action" id="os-start-btn-newtab" type="button">
+          <span>＋ New Browser Tab</span>
+        </button>
+        <button class="os-start-action" id="os-start-btn-pin" type="button">
+          <span>＋ Pin New App</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="dock-bar-wrap" id="dock-bar-wrap">
+      <nav class="os-dock" id="os-dock" aria-label="Oni OS Open Tabs Dock">
+        <button class="os-dock-item start-orb" id="dock-btn-start" aria-label="Oni OS Start Menu">
+          <img src="../../assets/app-icon.png" alt="Oni Start" class="dock-start-icon">
+        </button>
+        <div class="os-dock-sep hidden" id="dock-sep"></div>
+        <div class="os-dock-tabs hidden" id="os-dock-tabs">
+          <!-- Dynamically populated with currently open tabs (excluding home page) -->
+        </div>
+      </nav>
+    </div>
+  </div>
+  <script src="dock.js"></script>
+</body>
+</html>
