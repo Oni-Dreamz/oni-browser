@@ -27,11 +27,27 @@ if (window.location.protocol === 'file:') {
     findInPage: (text, forward) => ipcRenderer.invoke('tab:findInPage', { text, forward }),
     stopFindInPage: (action) => ipcRenderer.invoke('tab:stopFindInPage', action),
 
-    // Bookmarks
+    // Bookmarks (Start Menu Pinned Apps)
     getBookmarks: () => ipcRenderer.invoke('bookmarks:get'),
     addBookmark: (bookmark) => ipcRenderer.invoke('bookmarks:add', bookmark),
     removeBookmark: (idOrUrl) => ipcRenderer.invoke('bookmarks:remove', idOrUrl),
+    setBookmarks: (list) => ipcRenderer.invoke('bookmarks:set', list),
     isBookmarked: (url) => ipcRenderer.invoke('bookmarks:isBookmarked', url),
+
+    // Desktop Apps (Home Page Grid Layout)
+    getDesktopApps: () => ipcRenderer.invoke('desktop-apps:get'),
+    setDesktopApps: (list) => ipcRenderer.invoke('desktop-apps:set', list),
+    addDesktopApp: (app) => ipcRenderer.invoke('desktop-apps:add', app),
+    removeDesktopApp: (idOrUrl) => ipcRenderer.invoke('desktop-apps:remove', idOrUrl),
+    onDesktopAppsUpdated: (callback) => {
+      const handler = (event, list) => callback(list);
+      ipcRenderer.on('desktop-apps:updated', handler);
+      return () => ipcRenderer.removeListener('desktop-apps:updated', handler);
+    },
+
+    // Clipboard
+    readClipboardText: () => ipcRenderer.invoke('clipboard:readText'),
+    writeClipboardText: (text) => ipcRenderer.invoke('clipboard:writeText', text),
 
     // History & Privacy
     getHistory: () => ipcRenderer.invoke('history:get'),
@@ -63,6 +79,9 @@ if (window.location.protocol === 'file:') {
     setTopBarHeight: (height) => ipcRenderer.invoke('ui:setTopBarHeight', height),
     setOverlayOpen: (isOpen) => ipcRenderer.invoke('ui:setOverlayOpen', isOpen),
     setDockBounds: (bounds) => ipcRenderer.invoke('ui:setDockBounds', bounds),
+    focusDock: () => ipcRenderer.invoke('dock:focus'),
+    toggleDock: (state) => ipcRenderer.invoke('ui:toggleDock', state),
+    getDockVisibility: () => ipcRenderer.invoke('ui:getDockVisibility'),
     triggerOsAction: (action) => ipcRenderer.invoke('os:triggerAction', action),
     showDockTooltip: (data) => ipcRenderer.invoke('tooltip:show', data),
     hideDockTooltip: () => ipcRenderer.invoke('tooltip:hide'),
@@ -146,6 +165,16 @@ if (window.location.protocol === 'file:') {
       const handler = (event, data) => callback(data);
       ipcRenderer.on('toast:display', handler);
       return () => ipcRenderer.removeListener('toast:display', handler);
+    },
+    onDockVisibilityChange: (callback) => {
+      const handler = (event, isVisible) => callback(isVisible);
+      ipcRenderer.on('ui:dockVisibilityChange', handler);
+      return () => ipcRenderer.removeListener('ui:dockVisibilityChange', handler);
+    },
+    onHtmlFullscreenChange: (callback) => {
+      const handler = (event, isFullscreen) => callback(isFullscreen);
+      ipcRenderer.on('window:htmlFullscreenChange', handler);
+      return () => ipcRenderer.removeListener('window:htmlFullscreenChange', handler);
     }
   });
 }

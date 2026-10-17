@@ -1122,4 +1122,16 @@ body.theme-oni-os #find-bar {
   margin-left: 4px;
 }
 
+body.html-fullscreen,
+body.html-fullscreen #browser-chrome,
+body.html-fullscreen #os-menubar,
+body.html-fullscreen #titlebar,
+body.html-fullscreen #toolbar {
+  display: none !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
 

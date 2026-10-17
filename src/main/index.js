@@ -15,6 +15,7 @@ let tabCounter = 0;
 let topBarHeight = 84; // Default topbar height (tabs + toolbar)
 let isOverlayActive = false;
 let isHtmlFullscreen = false;
+let isDockHiddenByUser = false;
 
 function isOniOsThemeActive() {
   const activeTheme = store.getActiveTheme();
@@ -32,7 +33,7 @@ function sendToChromeAndDock(channel, payload) {
 
 function updateDockViewBounds() {
   if (!mainWindow || mainWindow.isDestroyed() || !dockView) return;
-  if (!isOniOsThemeActive() || isOverlayActive || isHtmlFullscreen) {
+  if (!isOniOsThemeActive() || isOverlayActive || isHtmlFullscreen || isDockHiddenByUser) {
     dockView.setVisible(false);
     dockView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
     if (tooltipView) {
@@ -119,6 +120,9 @@ function loadTabUrl(tab, url) {
 function getActiveViewBounds() {
   if (!mainWindow) return { x: 0, y: 0, width: 0, height: 0 };
   const [width, height] = mainWindow.getContentSize();
+  if (isHtmlFullscreen) {
+    return { x: 0, y: 0, width, height };
+  }
   const y = topBarHeight;
   const h = Math.max(0, height - y);
   return { x: 0, y, width, height: h };
@@ -322,16 +326,23 @@ function createTab(initialUrl = 'oni://newtab', options = {}) {
   // HTML5 Fullscreen (video players)
   wc.on('enter-html-full-screen', () => {
     isHtmlFullscreen = true;
-    if (mainWindow) {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('window:htmlFullscreenChange', true);
       const [width, height] = mainWindow.getContentSize();
       view.setBounds({ x: 0, y: 0, width, height });
+      // Bring active tab view to front above topbar
+      mainWindow.contentView.addChildView(view);
     }
     updateDockViewBounds();
   });
 
   wc.on('leave-html-full-screen', () => {
     isHtmlFullscreen = false;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('window:htmlFullscreenChange', false);
+    }
     updateActiveViewBounds();
+    bringDockAndTooltipToFront();
   });
 
   // Find in page results
@@ -892,12 +903,14 @@ ipcMain.handle('tab:stopFindInPage', (event, action = 'clearSelection') => {
   }
 });
 
-// Pinned Apps (Bookmarks) IPC
-function broadcastBookmarksUpdated(list) {
+// Pinned Apps (Unified Bookmarks & Desktop Apps) IPC
+function broadcastPinnedAppsUpdated(list) {
   sendToChromeAndDock('bookmarks:updated', list);
-  for (const [, tab] of tabs.entries()) {
-    if (tab.url && tab.url.startsWith('oni://') && !tab.view.webContents.isDestroyed()) {
+  sendToChromeAndDock('desktop-apps:updated', list);
+  for (const tab of tabs.values()) {
+    if (tab.view && tab.view.webContents && !tab.view.webContents.isDestroyed()) {
       tab.view.webContents.send('bookmarks:updated', list);
+      tab.view.webContents.send('desktop-apps:updated', list);
     }
   }
 }
@@ -905,15 +918,49 @@ function broadcastBookmarksUpdated(list) {
 ipcMain.handle('bookmarks:get', () => store.getBookmarks());
 ipcMain.handle('bookmarks:add', (event, bookmark) => {
   const list = store.addBookmark(bookmark);
-  broadcastBookmarksUpdated(list);
+  broadcastPinnedAppsUpdated(list);
   return list;
 });
 ipcMain.handle('bookmarks:remove', (event, idOrUrl) => {
   const list = store.removeBookmark(idOrUrl);
-  broadcastBookmarksUpdated(list);
+  broadcastPinnedAppsUpdated(list);
   return list;
 });
+ipcMain.handle('bookmarks:set', (event, list) => {
+  const updated = store.setBookmarks(list);
+  broadcastPinnedAppsUpdated(updated);
+  return updated;
+});
 ipcMain.handle('bookmarks:isBookmarked', (event, url) => store.isBookmarked(url));
+
+// Desktop Apps (Home Page Layout) IPC - 100% unified with Pinned Apps
+ipcMain.handle('desktop-apps:get', () => store.getBookmarks());
+ipcMain.handle('desktop-apps:set', (event, list) => {
+  const updated = store.setBookmarks(list);
+  broadcastPinnedAppsUpdated(updated);
+  return updated;
+});
+ipcMain.handle('desktop-apps:add', (event, app) => {
+  const list = store.addBookmark(app);
+  broadcastPinnedAppsUpdated(list);
+  return list;
+});
+ipcMain.handle('desktop-apps:remove', (event, idOrUrl) => {
+  const list = store.removeBookmark(idOrUrl);
+  broadcastPinnedAppsUpdated(list);
+  return list;
+});
+
+// Clipboard IPC (for context menus)
+ipcMain.handle('clipboard:readText', () => {
+  const { clipboard } = require('electron');
+  return clipboard.readText();
+});
+ipcMain.handle('clipboard:writeText', (event, text) => {
+  const { clipboard } = require('electron');
+  clipboard.writeText(text || '');
+  return true;
+});
 
 // History IPC
 ipcMain.handle('history:get', () => store.getHistory());
@@ -1118,6 +1165,30 @@ ipcMain.handle('toast:hide', () => {
   hideToastView();
 });
 
+ipcMain.handle('dock:focus', () => {
+  if (dockView && dockView.webContents && !dockView.webContents.isDestroyed()) {
+    dockView.webContents.focus();
+  }
+});
+
+ipcMain.handle('ui:toggleDock', (event, explicitState) => {
+  if (typeof explicitState === 'boolean') {
+    isDockHiddenByUser = !explicitState;
+  } else {
+    isDockHiddenByUser = !isDockHiddenByUser;
+  }
+  updateDockViewBounds();
+  const isVisible = !isDockHiddenByUser;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('ui:dockVisibilityChange', isVisible);
+  }
+  return isVisible;
+});
+
+ipcMain.handle('ui:getDockVisibility', () => {
+  return !isDockHiddenByUser;
+});
+
 ipcMain.handle('os:triggerAction', (event, action) => {
   hideContextMenuView();
   if (action === 'downloads') {
@@ -1132,6 +1203,7 @@ ipcMain.handle('os:triggerAction', (event, action) => {
   }
 
   if (dockView && dockView.webContents && !dockView.webContents.isDestroyed()) {
+    dockView.webContents.focus();
     dockView.webContents.send('os:action', action);
   }
 });

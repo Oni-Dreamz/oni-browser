@@ -4,14 +4,20 @@
 
   const dockEl = document.getElementById('os-dock');
   const dockBarWrap = document.getElementById('dock-bar-wrap');
+  const dockTabsWrap = document.getElementById('os-dock-tabs-wrap');
   const dockTabsEl = document.getElementById('os-dock-tabs');
   const dockSepEl = document.getElementById('dock-sep');
   const btnStart = document.getElementById('dock-btn-start');
+  const btnScrollLeft = document.getElementById('dock-scroll-left');
+  const btnScrollRight = document.getElementById('dock-scroll-right');
 
   const startMenuEl = document.getElementById('os-start-menu');
   const startAppsGrid = document.getElementById('os-start-apps-grid');
   const startBtnNewTab = document.getElementById('os-start-btn-newtab');
   const startBtnPin = document.getElementById('os-start-btn-pin');
+  const startBtnEdit = document.getElementById('os-start-btn-edit');
+  let isStartMenuEditMode = false;
+  let draggedAppIndex = null;
 
   // Popup Modals DOM
   const spotlightWin = document.getElementById('os-win-spotlight');
@@ -38,6 +44,47 @@
   let activeTabId = null;
   let isStartMenuOpen = false;
   let currentSearchEngine = 'google';
+
+  const searchCtxMenu = document.getElementById('os-search-context-menu');
+  const appCtxMenu = document.getElementById('os-app-context-menu');
+  let activeContextApp = null;
+
+  function showSearchContextMenu(clientX, clientY) {
+    if (!searchCtxMenu) return;
+    if (appCtxMenu) appCtxMenu.classList.add('hidden');
+    const x = Math.min(window.innerWidth - 180, Math.max(8, clientX));
+    const y = Math.min(window.innerHeight - 190, Math.max(8, clientY));
+    searchCtxMenu.style.left = `${x}px`;
+    searchCtxMenu.style.top = `${y}px`;
+    searchCtxMenu.classList.remove('hidden');
+    reportBounds();
+  }
+
+  function hideSearchContextMenu() {
+    if (searchCtxMenu && !searchCtxMenu.classList.contains('hidden')) {
+      searchCtxMenu.classList.add('hidden');
+      reportBounds();
+    }
+  }
+
+  function showAppContextMenu(clientX, clientY, app) {
+    if (!appCtxMenu) return;
+    activeContextApp = app;
+    if (searchCtxMenu) searchCtxMenu.classList.add('hidden');
+    const x = Math.min(window.innerWidth - 200, Math.max(8, clientX));
+    const y = Math.min(window.innerHeight - 220, Math.max(8, clientY));
+    appCtxMenu.style.left = `${x}px`;
+    appCtxMenu.style.top = `${y}px`;
+    appCtxMenu.classList.remove('hidden');
+    reportBounds();
+  }
+
+  function hideAppContextMenu() {
+    if (appCtxMenu && !appCtxMenu.classList.contains('hidden')) {
+      appCtxMenu.classList.add('hidden');
+      reportBounds();
+    }
+  }
 
   const ENGINES = {
     google: 'https://www.google.com/search?q=',
@@ -66,7 +113,8 @@
 
   function isAnyModalOpen() {
     const openModals = document.querySelectorAll('.os-window:not(.hidden)');
-    return openModals.length > 0;
+    const openCtx = document.querySelectorAll('.os-context-menu:not(.hidden)');
+    return openModals.length > 0 || openCtx.length > 0;
   }
 
   const DOCK_BAR_HEIGHT = 100;
@@ -75,7 +123,7 @@
     if (!dockEl || !window.oniAPI || !window.oniAPI.setDockBounds) return;
     requestAnimationFrame(() => {
       const isFullScreen = isStartMenuOpen || isAnyModalOpen();
-      const dockWidth = dockEl.offsetWidth || 70;
+      const dockWidth = Math.min(1040, dockEl.offsetWidth || 70);
       const width = dockWidth + 160; // 80px drop shadow glow margin on each side
       const height = DOCK_BAR_HEIGHT;
       window.oniAPI.setDockBounds({
@@ -97,7 +145,13 @@
   function closeStartMenu() {
     if (!startMenuEl || !isStartMenuOpen) return;
     isStartMenuOpen = false;
+    isStartMenuEditMode = false;
+    if (startBtnEdit) {
+      startBtnEdit.textContent = 'Edit';
+      startBtnEdit.classList.remove('active');
+    }
     startMenuEl.classList.add('hidden');
+    renderStartMenuApps();
     reportBounds();
   }
 
@@ -107,6 +161,30 @@
     } else {
       openStartMenu();
     }
+  }
+
+  // Window Management for Draggable Floating Modals
+  function updateSpotlightUrlFromActiveTab() {
+    if (!spotlightInput || !spotlightWin || spotlightWin.classList.contains('hidden')) return;
+
+    let currentUrl = '';
+    const active = tabs.find(t => t.id === activeTabId || t.isActive);
+    if (active) currentUrl = active.url || '';
+
+    const isHome = !currentUrl || currentUrl === 'oni://home' || currentUrl === 'oni://newtab' || currentUrl.startsWith('oni://');
+    if (!isHome) {
+      spotlightInput.value = currentUrl;
+      renderSpotlightResults(currentUrl);
+    } else {
+      spotlightInput.value = '';
+      renderSpotlightResults('');
+    }
+    const doFocus = () => {
+      spotlightInput.focus();
+      spotlightInput.select();
+    };
+    doFocus();
+    requestAnimationFrame(doFocus);
   }
 
   // Window Management for Draggable Floating Modals
@@ -122,11 +200,48 @@
     winEl.classList.remove('hidden');
     reportBounds();
 
+    if (window.oniAPI && window.oniAPI.focusDock) {
+      window.oniAPI.focusDock();
+    }
+
     if (winId === 'os-win-spotlight') {
       if (spotlightInput) {
-        spotlightInput.value = '';
-        renderSpotlightResults('');
-        setTimeout(() => spotlightInput.focus(), 50);
+        let currentUrl = '';
+        try {
+          if (window.oniAPI && window.oniAPI.getTabs) {
+            const allTabs = await window.oniAPI.getTabs();
+            if (Array.isArray(allTabs)) {
+              tabs = allTabs;
+              const active = allTabs.find(t => t.isActive || t.id === activeTabId);
+              if (active) currentUrl = active.url || '';
+            }
+          }
+        } catch (e) {}
+
+        if (!currentUrl && activeTabId) {
+          const active = tabs.find(t => t.id === activeTabId);
+          if (active) currentUrl = active.url || '';
+        }
+
+        const isHome = !currentUrl || currentUrl === 'oni://home' || currentUrl === 'oni://newtab' || currentUrl.startsWith('oni://');
+        if (!isHome) {
+          spotlightInput.value = currentUrl;
+          renderSpotlightResults(currentUrl);
+        } else {
+          spotlightInput.value = '';
+          renderSpotlightResults('');
+        }
+
+        const doFocus = () => {
+          if (spotlightInput) {
+            spotlightInput.focus();
+            spotlightInput.select();
+          }
+        };
+        doFocus();
+        requestAnimationFrame(doFocus);
+        setTimeout(doFocus, 50);
+        setTimeout(doFocus, 150);
       }
     } else if (winId === 'os-win-history') {
       await renderOsHistoryWindow();
@@ -136,7 +251,24 @@
     } else if (winId === 'os-win-settings') {
       await renderOsSettingsWindow();
     } else if (winId === 'os-win-add-app') {
-      await setupAddAppWindow(options.autofillActiveTab);
+      let isHome = false;
+      let currentUrl = '';
+      try {
+        if (window.oniAPI && window.oniAPI.getTabs) {
+          const freshTabs = await window.oniAPI.getTabs();
+          if (Array.isArray(freshTabs)) {
+            tabs = freshTabs;
+            const current = freshTabs.find(t => t.isActive);
+            if (current) currentUrl = current.url || '';
+          }
+        }
+      } catch (e) {}
+      if (!currentUrl && activeTabId) {
+        const current = tabs.find(t => t.id === activeTabId);
+        if (current) currentUrl = current.url || '';
+      }
+      isHome = !currentUrl || currentUrl === 'oni://home' || currentUrl === 'oni://newtab' || currentUrl.startsWith('oni://');
+      await setupAddAppWindow(!isHome);
     }
   }
 
@@ -148,8 +280,15 @@
     reportBounds();
   }
 
-  async function setupAddAppWindow(autofill = true) {
-    if (!autofill) return;
+  async function setupAddAppWindow(autofill = false) {
+    if (appTitleInput) appTitleInput.value = '';
+    if (appUrlInput) appUrlInput.value = '';
+    if (appIconInput) appIconInput.value = '';
+
+    if (!autofill) {
+      if (appTitleInput) setTimeout(() => appTitleInput.focus(), 60);
+      return;
+    }
 
     let targetUrl = '';
     let targetTitle = '';
@@ -208,20 +347,81 @@
       }
     }
 
-    if (appTitleInput && !appTitleInput.value) {
-      setTimeout(() => appTitleInput.focus(), 60);
-    } else if (appUrlInput) {
-      setTimeout(() => appUrlInput.focus(), 60);
+    if (appTitleInput) {
+      const doFocusTitle = () => {
+        appTitleInput.focus();
+        appTitleInput.select();
+      };
+      doFocusTitle();
+      requestAnimationFrame(doFocusTitle);
+      setTimeout(doFocusTitle, 60);
+      setTimeout(doFocusTitle, 150);
     }
   }
 
   function renderStartMenuApps() {
     if (!startAppsGrid) return;
     startAppsGrid.innerHTML = '';
-    pinnedApps.forEach(app => {
+    pinnedApps.forEach((app, index) => {
       const item = document.createElement('a');
-      item.className = 'os-start-app';
+      item.className = 'os-start-app' + (isStartMenuEditMode ? ' editing' : '');
       item.href = app.url;
+      item.dataset.index = index;
+
+      if (isStartMenuEditMode) {
+        item.draggable = true;
+        item.title = 'Drag to reorder';
+
+        item.addEventListener('dragstart', (e) => {
+          draggedAppIndex = index;
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', String(index));
+          setTimeout(() => item.classList.add('dragging'), 0);
+        });
+
+        item.addEventListener('dragend', () => {
+          item.classList.remove('dragging');
+          document.querySelectorAll('.os-start-app').forEach(el => el.classList.remove('drag-over'));
+          draggedAppIndex = null;
+        });
+
+        item.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          item.classList.add('drag-over');
+
+          // Auto-scroll when dragging near top/bottom edges
+          const rect = startAppsGrid.getBoundingClientRect();
+          const edgeThreshold = 45;
+          const y = e.clientY;
+          if (y - rect.top < edgeThreshold) {
+            const factor = Math.max(1, (edgeThreshold - (y - rect.top)) / 5);
+            startAppsGrid.scrollTop -= factor * 5;
+          } else if (rect.bottom - y < edgeThreshold) {
+            const factor = Math.max(1, (edgeThreshold - (rect.bottom - y)) / 5);
+            startAppsGrid.scrollTop += factor * 5;
+          }
+        });
+
+        item.addEventListener('dragleave', () => {
+          item.classList.remove('drag-over');
+        });
+
+        item.addEventListener('drop', async (e) => {
+          e.preventDefault();
+          item.classList.remove('drag-over');
+          const fromIndex = draggedAppIndex !== null ? draggedAppIndex : parseInt(e.dataTransfer.getData('text/plain'), 10);
+          const toIndex = index;
+          if (fromIndex !== null && !isNaN(fromIndex) && fromIndex !== toIndex) {
+            const [moved] = pinnedApps.splice(fromIndex, 1);
+            pinnedApps.splice(toIndex, 0, moved);
+            renderStartMenuApps();
+            if (window.oniAPI && window.oniAPI.setBookmarks) {
+              await window.oniAPI.setBookmarks(pinnedApps);
+            }
+          }
+        });
+      }
 
       const img = document.createElement('img');
       img.src = app.icon || '../../assets/app-icon.png';
@@ -234,12 +434,52 @@
       item.appendChild(img);
       item.appendChild(span);
 
-      item.addEventListener('click', (e) => {
+      item.addEventListener('click', async (e) => {
         e.preventDefault();
+        if (isStartMenuEditMode) return;
         closeStartMenu();
-        if (window.oniAPI && window.oniAPI.createTab) {
-          window.oniAPI.createTab(app.url);
+        let isHome = false;
+        let currentTabId = activeTabId;
+        try {
+          if (window.oniAPI && window.oniAPI.getTabs) {
+            const freshTabs = await window.oniAPI.getTabs();
+            if (Array.isArray(freshTabs)) {
+              tabs = freshTabs;
+              const current = freshTabs.find(t => t.isActive);
+              if (current) {
+                currentTabId = current.id;
+                isHome = isDesktopHomeTab(current);
+              }
+            }
+          }
+        } catch (err) {}
+
+        if (!currentTabId && activeTabId) {
+          currentTabId = activeTabId;
+          const current = tabs.find(t => t.id === activeTabId);
+          if (current) isHome = isDesktopHomeTab(current);
         }
+
+        if (isHome || !currentTabId) {
+          // Open in a new tab when strictly on the home page (or no tab open)
+          if (window.oniAPI && window.oniAPI.createTab) {
+            window.oniAPI.createTab(app.url);
+          }
+        } else {
+          // Change current open page to the selected app (e.g. New Tab or active web page)
+          if (currentTabId && window.oniAPI && window.oniAPI.navigate) {
+            window.oniAPI.navigate(app.url, currentTabId);
+          } else if (window.oniAPI && window.oniAPI.createTab) {
+            window.oniAPI.createTab(app.url);
+          }
+        }
+      });
+
+      // Right-click context menu on pinned app
+      item.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        showAppContextMenu(e.clientX, e.clientY, app);
       });
 
       startAppsGrid.appendChild(item);
@@ -275,17 +515,58 @@
     return DEFAULT_GLOBE_SVG;
   }
 
+  function updateDockScrollArrows() {
+    if (!dockTabsEl || !btnScrollLeft || !btnScrollRight) return;
+    if (dockTabsEl.classList.contains('hidden')) {
+      btnScrollLeft.classList.add('hidden');
+      btnScrollRight.classList.add('hidden');
+      return;
+    }
+    const scrollLeft = dockTabsEl.scrollLeft;
+    const maxScroll = Math.max(0, dockTabsEl.scrollWidth - dockTabsEl.clientWidth);
+    const hasOverflow = maxScroll > 8;
+
+    const canScrollLeft = hasOverflow && scrollLeft > 6;
+    const canScrollRight = hasOverflow && (maxScroll - scrollLeft > 6);
+
+    btnScrollLeft.classList.toggle('hidden', !canScrollLeft);
+    btnScrollRight.classList.toggle('hidden', !canScrollRight);
+  }
+
+  function scrollActiveTabIntoView() {
+    if (!dockTabsEl || dockTabsEl.classList.contains('hidden')) return;
+    const activeEl = dockTabsEl.querySelector('.tab-dock-item.active');
+    if (activeEl) {
+      activeEl.scrollIntoView({
+        behavior: 'smooth',
+        block: 'nearest',
+        inline: 'nearest'
+      });
+      requestAnimationFrame(() => {
+        updateDockScrollArrows();
+      });
+    }
+  }
+
   function renderDockTabs() {
     if (!dockTabsEl) return;
     dockTabsEl.innerHTML = '';
 
     // Filter out the persistent home page (oni://home) from the dock tab bar
     const visibleTabs = tabs.filter(tab => !isDesktopHomeTab(tab));
+    const hasVisibleTabs = visibleTabs.length > 0;
 
     if (dockSepEl) {
-      dockSepEl.classList.toggle('hidden', visibleTabs.length === 0);
+      dockSepEl.classList.toggle('hidden', !hasVisibleTabs);
     }
-    dockTabsEl.classList.toggle('hidden', visibleTabs.length === 0);
+    if (dockTabsWrap) {
+      dockTabsWrap.classList.toggle('hidden', !hasVisibleTabs);
+    }
+    dockTabsEl.classList.toggle('hidden', !hasVisibleTabs);
+    if (dockEl) {
+      dockEl.classList.toggle('no-tabs', !hasVisibleTabs);
+      dockEl.classList.toggle('has-tabs', hasVisibleTabs);
+    }
 
     visibleTabs.forEach(tab => {
       const isActive = tab.id === activeTabId;
@@ -320,6 +601,14 @@
         closeStartMenu();
         if (window.oniAPI) window.oniAPI.closeTab(tab.id);
       });
+      closeBtn.addEventListener('mouseenter', (e) => {
+        e.stopPropagation();
+        showTooltip('Close Tab', btn);
+      });
+      closeBtn.addEventListener('mouseleave', (e) => {
+        e.stopPropagation();
+        showTooltip(tab.title || 'Tab', btn);
+      });
       btn.appendChild(closeBtn);
 
       // Switch tab on click (Modals remain retained over active tab change!)
@@ -350,51 +639,65 @@
     });
 
     reportBounds();
+    requestAnimationFrame(() => {
+      updateDockScrollArrows();
+      scrollActiveTabIntoView();
+    });
   }
 
-  // Search Results Rendering inside Search Popup Modal
+  // Address Bar Search Suggestions inside Search Popup Modal
   function renderSpotlightResults(filterText) {
     if (!spotlightResults) return;
-    const term = (filterText || '').toLowerCase().trim();
+    const query = (filterText || '').trim();
     spotlightResults.innerHTML = '';
 
-    const matched = pinnedApps.filter(app => {
-      if (!term) return true;
-      return (app.title || '').toLowerCase().includes(term) || (app.url || '').toLowerCase().includes(term);
-    });
-
-    if (matched.length === 0) {
-      spotlightResults.innerHTML = '<div style="color:var(--text-muted); font-size:12px; grid-column:1/-1; padding:8px;">No matching apps found. Press Launch to search the web.</div>';
+    if (!query) {
+      spotlightResults.innerHTML = '<div class="os-spotlight-empty-hint">Type a web address (e.g. reddit.com) or search query and press Enter.</div>';
       return;
     }
 
-    matched.slice(0, 16).forEach(app => {
-      const item = document.createElement('div');
-      item.className = 'os-spotlight-item';
+    const isUrl = /^https?:\/\//i.test(query) || /^file:\/\//i.test(query) || /^([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(:\d+)?(\/.*)?$/i.test(query) || /^localhost(:\d+)?(\/.*)?$/i.test(query);
+    const destUrl = isUrl ? (/^https?:\/\//i.test(query) ? query : `https://${query}`) : query;
+    const engineName = (currentSearchEngine || 'google').charAt(0).toUpperCase() + (currentSearchEngine || 'google').slice(1);
 
-      const img = document.createElement('img');
-      img.src = app.icon || '../../assets/app-icon.png';
-      img.onerror = () => { img.src = '../../assets/app-icon.png'; };
-
-      const span = document.createElement('span');
-      span.textContent = app.title;
-      span.style.overflow = 'hidden';
-      span.style.textOverflow = 'ellipsis';
-      span.style.whiteSpace = 'nowrap';
-
-      item.appendChild(img);
-      item.appendChild(span);
-
-      item.addEventListener('click', () => {
-        if (activeTabId && window.oniAPI && window.oniAPI.navigate) {
-          window.oniAPI.navigate(app.url, activeTabId);
-        } else if (window.oniAPI && window.oniAPI.createTab) {
-          window.oniAPI.createTab(app.url);
-        }
+    if (isUrl) {
+      const navItem = document.createElement('div');
+      navItem.className = 'os-spotlight-suggestion';
+      navItem.innerHTML = `
+        <div class="os-spotlight-suggestion-left">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+          <span style="font-weight:600;">Go to:</span>
+          <span style="color:var(--accent-green); overflow:hidden; text-overflow:ellipsis;">${destUrl}</span>
+        </div>
+        <span class="os-spotlight-suggestion-badge">Enter ↵</span>
+      `;
+      navItem.addEventListener('click', () => {
+        executeSearchOrNavigate(query);
       });
+      spotlightResults.appendChild(navItem);
+    }
 
-      spotlightResults.appendChild(item);
+    const searchItem = document.createElement('div');
+    searchItem.className = 'os-spotlight-suggestion';
+    searchItem.innerHTML = `
+      <div class="os-spotlight-suggestion-left">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <span style="font-weight:600;">Search ${engineName}:</span>
+        <span style="color:#f8fafc; overflow:hidden; text-overflow:ellipsis;">"${query}"</span>
+      </div>
+      <span class="os-spotlight-suggestion-badge">Search</span>
+    `;
+    searchItem.addEventListener('click', () => {
+      const engineUrl = ENGINES[currentSearchEngine] || ENGINES.google;
+      const target = `${engineUrl}${encodeURIComponent(query)}`;
+      closeOsWindow('os-win-spotlight');
+      if (activeTabId && window.oniAPI && window.oniAPI.navigate) {
+        window.oniAPI.navigate(target, activeTabId);
+      } else if (window.oniAPI && window.oniAPI.createTab) {
+        window.oniAPI.createTab(target);
+      }
     });
+    spotlightResults.appendChild(searchItem);
   }
 
   function executeSearchOrNavigate(rawQuery) {
@@ -411,7 +714,7 @@
       destUrl = `${engineUrl}${encodeURIComponent(query)}`;
     }
 
-    // Retain search modal through webpage change!
+    closeOsWindow('os-win-spotlight');
     if (activeTabId && window.oniAPI && window.oniAPI.navigate) {
       window.oniAPI.navigate(destUrl, activeTabId);
     } else if (window.oniAPI && window.oniAPI.createTab) {
@@ -840,8 +1143,18 @@
 
   function applyThemeShortcuts(theme) {
     if (theme && theme.newTab && theme.newTab.shortcuts && Array.isArray(theme.newTab.shortcuts.items)) {
-      pinnedApps = theme.newTab.shortcuts.items;
-      renderStartMenuApps();
+      if (!pinnedApps || pinnedApps.length === 0) {
+        pinnedApps = theme.newTab.shortcuts.items.map(b => ({
+          id: b.id,
+          title: b.title,
+          url: b.url,
+          icon: b.icon || b.favicon || '',
+          favicon: b.favicon || b.icon || '',
+          gridCol: b.gridCol,
+          gridRow: b.gridRow
+        }));
+        renderStartMenuApps();
+      }
     }
   }
 
@@ -921,7 +1234,18 @@
       startBtnPin.addEventListener('click', (e) => {
         e.stopPropagation();
         closeStartMenu();
-        openOsWindow('os-win-add-app', { autofillActiveTab: true });
+        openOsWindow('os-win-add-app', { autofillActiveTab: false });
+      });
+    }
+
+    // Start Menu: Edit Pinned Apps Button
+    if (startBtnEdit) {
+      startBtnEdit.addEventListener('click', (e) => {
+        e.stopPropagation();
+        isStartMenuEditMode = !isStartMenuEditMode;
+        startBtnEdit.textContent = isStartMenuEditMode ? 'Done' : 'Edit';
+        startBtnEdit.classList.toggle('active', isStartMenuEditMode);
+        renderStartMenuApps();
       });
     }
 
@@ -982,8 +1306,179 @@
       });
     }
 
-    // Close Start Menu when clicking outside startMenuEl and dockEl
+    // Spotlight Search Input Context Menu
+    if (spotlightInput) {
+      spotlightInput.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        showSearchContextMenu(e.clientX, e.clientY);
+      });
+    }
+
+    document.getElementById('ctx-search-cut')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      hideSearchContextMenu();
+      if (!spotlightInput) return;
+      const start = spotlightInput.selectionStart;
+      const end = spotlightInput.selectionEnd;
+      const sel = spotlightInput.value.substring(start, end);
+      if (sel && window.oniAPI && window.oniAPI.writeClipboardText) {
+        window.oniAPI.writeClipboardText(sel);
+        spotlightInput.value = spotlightInput.value.substring(0, start) + spotlightInput.value.substring(end);
+        spotlightInput.setSelectionRange(start, start);
+        renderSpotlightResults(spotlightInput.value);
+      }
+    });
+
+    document.getElementById('ctx-search-copy')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      hideSearchContextMenu();
+      if (!spotlightInput) return;
+      const sel = spotlightInput.value.substring(spotlightInput.selectionStart, spotlightInput.selectionEnd) || spotlightInput.value;
+      if (sel && window.oniAPI && window.oniAPI.writeClipboardText) {
+        window.oniAPI.writeClipboardText(sel);
+      }
+    });
+
+    document.getElementById('ctx-search-paste')?.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      hideSearchContextMenu();
+      if (!spotlightInput) return;
+      if (window.oniAPI && window.oniAPI.readClipboardText) {
+        const text = await window.oniAPI.readClipboardText();
+        if (text) {
+          const start = spotlightInput.selectionStart || 0;
+          const end = spotlightInput.selectionEnd || 0;
+          const val = spotlightInput.value || '';
+          spotlightInput.value = val.substring(0, start) + text + val.substring(end);
+          const newPos = start + text.length;
+          spotlightInput.setSelectionRange(newPos, newPos);
+          renderSpotlightResults(spotlightInput.value);
+        }
+      }
+    });
+
+    document.getElementById('ctx-search-select-all')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      hideSearchContextMenu();
+      if (spotlightInput) {
+        spotlightInput.select();
+      }
+    });
+
+    document.getElementById('ctx-search-clear')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      hideSearchContextMenu();
+      if (spotlightInput) {
+        spotlightInput.value = '';
+        renderSpotlightResults('');
+        spotlightInput.focus();
+      }
+    });
+
+    // Pinned App Context Menu Actions
+    document.getElementById('ctx-app-open')?.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      hideAppContextMenu();
+      if (!activeContextApp) return;
+      closeStartMenu();
+      let isHome = false;
+      let currentTabId = activeTabId;
+      try {
+        if (window.oniAPI && window.oniAPI.getTabs) {
+          const freshTabs = await window.oniAPI.getTabs();
+          if (Array.isArray(freshTabs)) {
+            const current = freshTabs.find(t => t.isActive);
+            if (current) {
+              currentTabId = current.id;
+              isHome = isDesktopHomeTab(current);
+            }
+          }
+        }
+      } catch (err) {}
+
+      if (!currentTabId && activeTabId) {
+        currentTabId = activeTabId;
+        const current = tabs.find(t => t.id === activeTabId);
+        if (current) isHome = isDesktopHomeTab(current);
+      }
+
+      if (isHome || !currentTabId) {
+        if (window.oniAPI && window.oniAPI.createTab) window.oniAPI.createTab(activeContextApp.url);
+      } else {
+        if (currentTabId && window.oniAPI && window.oniAPI.navigate) {
+          window.oniAPI.navigate(activeContextApp.url, currentTabId);
+        } else if (window.oniAPI && window.oniAPI.createTab) {
+          window.oniAPI.createTab(activeContextApp.url);
+        }
+      }
+    });
+
+    document.getElementById('ctx-app-open-tab')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      hideAppContextMenu();
+      if (!activeContextApp) return;
+      closeStartMenu();
+      if (window.oniAPI && window.oniAPI.createTab) window.oniAPI.createTab(activeContextApp.url);
+    });
+
+    document.getElementById('ctx-app-copy-link')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      hideAppContextMenu();
+      if (activeContextApp && window.oniAPI && window.oniAPI.writeClipboardText) {
+        window.oniAPI.writeClipboardText(activeContextApp.url);
+      }
+    });
+
+    document.getElementById('ctx-app-edit')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      hideAppContextMenu();
+      if (!activeContextApp) return;
+      if (appTitleInput) appTitleInput.value = activeContextApp.title || '';
+      if (appUrlInput) appUrlInput.value = activeContextApp.url || '';
+      if (appIconInput) appIconInput.value = activeContextApp.icon || activeContextApp.favicon || '';
+      openOsWindow('os-win-add-app');
+    });
+
+    document.getElementById('ctx-app-delete')?.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      hideAppContextMenu();
+      if (!activeContextApp) return;
+      pinnedApps = pinnedApps.filter(p => p.id !== activeContextApp.id && p.url !== activeContextApp.url);
+      renderStartMenuApps();
+      if (window.oniAPI && window.oniAPI.removeBookmark) {
+        await window.oniAPI.removeBookmark(activeContextApp.id || activeContextApp.url);
+      }
+    });
+
+    // Mousewheel scroll while dragging in Start Menu
+    window.addEventListener('wheel', (e) => {
+      if (draggedAppIndex !== null && startAppsGrid) {
+        startAppsGrid.scrollTop += e.deltaY;
+      }
+    }, { passive: true });
+
+    if (startAppsGrid) {
+      startAppsGrid.addEventListener('dragover', (e) => {
+        if (draggedAppIndex === null) return;
+        e.preventDefault();
+        const rect = startAppsGrid.getBoundingClientRect();
+        const edgeThreshold = 45;
+        const y = e.clientY;
+        if (y - rect.top < edgeThreshold) {
+          const factor = Math.max(1, (edgeThreshold - (y - rect.top)) / 5);
+          startAppsGrid.scrollTop -= factor * 5;
+        } else if (rect.bottom - y < edgeThreshold) {
+          const factor = Math.max(1, (edgeThreshold - (rect.bottom - y)) / 5);
+          startAppsGrid.scrollTop += factor * 5;
+        }
+      });
+    }
+
+    // Close Start Menu and Context Menus when clicking outside
     document.addEventListener('click', (e) => {
+      hideSearchContextMenu();
+      hideAppContextMenu();
       if (isStartMenuOpen) {
         if (startMenuEl && startMenuEl.contains(e.target)) return;
         if (dockEl && dockEl.contains(e.target)) return;
@@ -993,7 +1488,11 @@
 
     window.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
-        if (isStartMenuOpen) {
+        if (searchCtxMenu && !searchCtxMenu.classList.contains('hidden')) {
+          hideSearchContextMenu();
+        } else if (appCtxMenu && !appCtxMenu.classList.contains('hidden')) {
+          hideAppContextMenu();
+        } else if (isStartMenuOpen) {
           closeStartMenu();
         } else if (isAnyModalOpen()) {
           // Close topmost open window on Escape
@@ -1007,6 +1506,8 @@
 
     window.addEventListener('blur', () => {
       hideTooltip();
+      hideSearchContextMenu();
+      hideAppContextMenu();
       if (isStartMenuOpen) {
         closeStartMenu();
       }
@@ -1019,7 +1520,15 @@
       try {
         const bms = await window.oniAPI.getBookmarks();
         if (Array.isArray(bms) && bms.length > 0) {
-          pinnedApps = bms.map(b => ({ title: b.title, url: b.url, icon: b.favicon || b.icon }));
+          pinnedApps = bms.map(b => ({
+            id: b.id,
+            title: b.title,
+            url: b.url,
+            icon: b.icon || b.favicon || '',
+            favicon: b.favicon || b.icon || '',
+            gridCol: b.gridCol,
+            gridRow: b.gridRow
+          }));
           renderStartMenuApps();
         }
       } catch (e) {}
@@ -1028,7 +1537,15 @@
     if (window.oniAPI.onBookmarksUpdated) {
       window.oniAPI.onBookmarksUpdated((bms) => {
         if (Array.isArray(bms)) {
-          pinnedApps = bms.map(b => ({ title: b.title, url: b.url, icon: b.favicon || b.icon }));
+          pinnedApps = bms.map(b => ({
+            id: b.id,
+            title: b.title,
+            url: b.url,
+            icon: b.icon || b.favicon || '',
+            favicon: b.favicon || b.icon || '',
+            gridCol: b.gridCol,
+            gridRow: b.gridRow
+          }));
           renderStartMenuApps();
           if (spotlightInput && !spotlightWin.classList.contains('hidden')) {
             renderSpotlightResults(spotlightInput.value);
@@ -1074,7 +1591,7 @@
           openOsWindow('os-win-settings');
         } else if (action === 'pin-app' || action === 'add-app') {
           closeStartMenu();
-          openOsWindow('os-win-add-app', { autofillActiveTab: true });
+          openOsWindow('os-win-add-app', { autofillActiveTab: false });
         }
       });
     }
@@ -1122,7 +1639,10 @@
       } else {
         tabs.push(updatedTab);
       }
-      if (updatedTab.isActive) activeTabId = updatedTab.id;
+      if (updatedTab.isActive) {
+        activeTabId = updatedTab.id;
+        updateSpotlightUrlFromActiveTab();
+      }
       renderDockTabs();
     });
 
@@ -1130,6 +1650,7 @@
       tabs = tabs.filter(t => t.id !== tabId);
       hideTooltip();
       renderDockTabs();
+      updateSpotlightUrlFromActiveTab();
     });
 
     window.oniAPI.onTabSwitched((tabId) => {
@@ -1137,10 +1658,53 @@
       tabs.forEach(t => { t.isActive = (t.id === tabId); });
       hideTooltip();
       renderDockTabs();
+      updateSpotlightUrlFromActiveTab();
     });
+
+    // Horizontal wheel scroll support for dock tabs
+    if (dockEl) {
+      dockEl.addEventListener('wheel', (e) => {
+        if (!dockTabsEl || dockTabsEl.classList.contains('hidden')) return;
+        const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+        if (Math.abs(delta) > 0) {
+          e.preventDefault();
+          dockTabsEl.scrollLeft += delta;
+          hideTooltip();
+          updateDockScrollArrows();
+        }
+      }, { passive: false });
+    }
+
+    if (dockTabsEl) {
+      dockTabsEl.addEventListener('scroll', () => {
+        hideTooltip();
+        updateDockScrollArrows();
+      }, { passive: true });
+    }
+
+    if (btnScrollLeft) {
+      btnScrollLeft.addEventListener('click', (e) => {
+        e.stopPropagation();
+        hideTooltip();
+        if (dockTabsEl) {
+          dockTabsEl.scrollBy({ left: -220, behavior: 'smooth' });
+        }
+      });
+    }
+
+    if (btnScrollRight) {
+      btnScrollRight.addEventListener('click', (e) => {
+        e.stopPropagation();
+        hideTooltip();
+        if (dockTabsEl) {
+          dockTabsEl.scrollBy({ left: 220, behavior: 'smooth' });
+        }
+      });
+    }
 
     window.addEventListener('resize', () => {
       hideTooltip();
+      updateDockScrollArrows();
       reportBounds();
     });
 

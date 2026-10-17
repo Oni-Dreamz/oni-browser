@@ -38,6 +38,7 @@
   const osMenuDownloads = document.getElementById('os-menu-downloads');
   const osDlBadge = document.getElementById('os-dl-badge');
   const osMenuSettings = document.getElementById('os-menu-settings');
+  const osMenuToggleDock = document.getElementById('os-menu-toggle-dock');
 
   const bookmarksBar = document.getElementById('bookmarks-bar');
   const bookmarksBarList = document.getElementById('bookmarks-bar-list');
@@ -139,6 +140,17 @@
       });
     }
 
+    if (window.oniAPI.onHtmlFullscreenChange) {
+      window.oniAPI.onHtmlFullscreenChange((isFullscreen) => {
+        document.body.classList.toggle('html-fullscreen', isFullscreen);
+        const chrome = document.getElementById('browser-chrome');
+        if (chrome) {
+          chrome.style.display = isFullscreen ? 'none' : '';
+        }
+        reportTopBarHeight();
+      });
+    }
+
     // Sync any already-created tabs
     const initialTabs = await window.oniAPI.getTabs();
     if (Array.isArray(initialTabs) && initialTabs.length > 0) {
@@ -151,6 +163,10 @@
   }
 
   function reportTopBarHeight() {
+    if (document.body.classList.contains('html-fullscreen')) {
+      window.oniAPI.setTopBarHeight(0);
+      return;
+    }
     const chrome = document.getElementById('browser-chrome');
     if (chrome) {
       window.oniAPI.setTopBarHeight(chrome.offsetHeight);
@@ -203,6 +219,26 @@
     if (osMenuSettings) {
       osMenuSettings.addEventListener('click', () => {
         if (window.oniAPI.triggerOsAction) window.oniAPI.triggerOsAction('settings');
+      });
+    }
+    if (osMenuToggleDock) {
+      if (window.oniAPI && window.oniAPI.getDockVisibility) {
+        window.oniAPI.getDockVisibility().then((isVisible) => {
+          osMenuToggleDock.textContent = isVisible ? 'Hide Dock' : 'Show Dock';
+        }).catch(() => {});
+      }
+      osMenuToggleDock.addEventListener('click', async () => {
+        if (window.oniAPI && window.oniAPI.toggleDock) {
+          const isVisible = await window.oniAPI.toggleDock();
+          osMenuToggleDock.textContent = isVisible ? 'Hide Dock' : 'Show Dock';
+        }
+      });
+    }
+    if (window.oniAPI && window.oniAPI.onDockVisibilityChange) {
+      window.oniAPI.onDockVisibilityChange((isVisible) => {
+        if (osMenuToggleDock) {
+          osMenuToggleDock.textContent = isVisible ? 'Hide Dock' : 'Show Dock';
+        }
       });
     }
   }

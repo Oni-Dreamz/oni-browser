@@ -342,7 +342,7 @@ class Store {
   }
 
   getDefaultPinnedApps() {
-    return [
+    const list = [
       { id: 'pin_github', title: 'GitHub', url: 'https://github.com', icon: 'https://github.githubassets.com/favicons/favicon.png', favicon: 'https://github.githubassets.com/favicons/favicon.png', createdAt: 1729036800000 },
       { id: 'pin_youtube', title: 'YouTube', url: 'https://youtube.com', icon: 'https://www.youtube.com/s/desktop/f7125368/img/favicon_144x144.png', favicon: 'https://www.youtube.com/s/desktop/f7125368/img/favicon_144x144.png', createdAt: 1729036800000 },
       { id: 'pin_reddit', title: 'Reddit', url: 'https://reddit.com', icon: 'https://www.redditstatic.com/shreddit/assets/favicon/192x192.png', favicon: 'https://www.redditstatic.com/shreddit/assets/favicon/192x192.png', createdAt: 1729036800000 },
@@ -352,9 +352,15 @@ class Store {
       { id: 'pin_chatgpt', title: 'ChatGPT', url: 'https://chatgpt.com', icon: 'https://oaistatic-cdn.azureedge.net/chatgpt/favicon.ico', favicon: 'https://oaistatic-cdn.azureedge.net/chatgpt/favicon.ico', createdAt: 1729036800000 },
       { id: 'pin_claude', title: 'Claude', url: 'https://claude.ai', icon: 'https://claude.ai/favicon.ico', favicon: 'https://claude.ai/favicon.ico', createdAt: 1729036800000 }
     ];
+    return list.map((p, idx) => ({
+      ...p,
+      gridCol: Math.floor(idx / 6),
+      gridRow: idx % 6
+    }));
   }
 
   getDefaultData() {
+    const pins = this.getDefaultPinnedApps();
     return {
       settings: {
         searchEngine: 'google', // 'google' | 'duckduckgo' | 'bing' | 'brave'
@@ -367,7 +373,8 @@ class Store {
         restoreLastSession: false
       },
       themes: [cloneDeep(ONI_OS_THEME), cloneDeep(CLASSIC_THEME)],
-      bookmarks: this.getDefaultPinnedApps(),
+      bookmarks: pins,
+      desktopApps: pins,
       history: [],
       downloads: []
     };
@@ -413,7 +420,31 @@ class Store {
         const otherThemes = themes.filter(t => t.id !== 'oni-os' && t.id !== 'classic');
         themes = [oniOsTheme, classicTheme, ...otherThemes];
 
-        // Unify Pinned Apps (bookmarks + theme shortcuts)
+        // Collect existing grid coordinates from previous desktopApps or bookmarks
+        const gridCoords = new Map();
+        if (Array.isArray(parsed.desktopApps)) {
+          parsed.desktopApps.forEach((d, idx) => {
+            const norm = normalizePinUrl(d.url);
+            const coords = {
+              gridCol: (d.gridCol !== undefined && !isNaN(d.gridCol)) ? Number(d.gridCol) : Math.floor(idx / 6),
+              gridRow: (d.gridRow !== undefined && !isNaN(d.gridRow)) ? Number(d.gridRow) : (idx % 6)
+            };
+            if (d.id) gridCoords.set(d.id, coords);
+            if (norm) gridCoords.set(norm, coords);
+          });
+        }
+        if (Array.isArray(parsed.bookmarks)) {
+          parsed.bookmarks.forEach((b, idx) => {
+            if (b.gridCol !== undefined && b.gridRow !== undefined) {
+              const coords = { gridCol: Number(b.gridCol), gridRow: Number(b.gridRow) };
+              if (b.id) gridCoords.set(b.id, coords);
+              const norm = normalizePinUrl(b.url);
+              if (norm) gridCoords.set(norm, coords);
+            }
+          });
+        }
+
+        // Unify Pinned Apps (single source of truth for both Home Page & Start Menu)
         let unifiedPins = [];
         const seenUrls = new Set();
         const addPinCandidate = (p) => {
@@ -422,28 +453,70 @@ class Store {
           if (!norm || seenUrls.has(norm)) return;
           seenUrls.add(norm);
           const iconUrl = p.icon || p.favicon || '';
+          const existingCoords = (p.id && gridCoords.get(p.id)) || gridCoords.get(norm);
+          const col = (p.gridCol !== undefined && !isNaN(p.gridCol))
+            ? Number(p.gridCol)
+            : (existingCoords ? existingCoords.gridCol : undefined);
+          const row = (p.gridRow !== undefined && !isNaN(p.gridRow))
+            ? Number(p.gridRow)
+            : (existingCoords ? existingCoords.gridRow : undefined);
+
           unifiedPins.push({
             id: p.id || ('pin_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5)),
             title: p.title || 'Untitled',
             url: p.url,
             icon: iconUrl,
             favicon: iconUrl,
+            gridCol: col,
+            gridRow: row,
             createdAt: p.createdAt || Date.now()
           });
         };
 
-        // Include any Oni OS / Classic shortcuts first, then existing bookmarks
+        // Priority: existing bookmarks, then desktopApps, then theme shortcuts
+        if (Array.isArray(parsed.bookmarks)) {
+          parsed.bookmarks.forEach(addPinCandidate);
+        }
+        if (Array.isArray(parsed.desktopApps)) {
+          parsed.desktopApps.forEach(addPinCandidate);
+        }
         themes.forEach(t => {
           if (t.newTab && t.newTab.shortcuts && Array.isArray(t.newTab.shortcuts.items)) {
             t.newTab.shortcuts.items.forEach(addPinCandidate);
           }
         });
-        if (Array.isArray(parsed.bookmarks)) {
-          parsed.bookmarks.forEach(addPinCandidate);
-        }
         if (unifiedPins.length === 0) {
           unifiedPins = this.getDefaultPinnedApps();
         }
+
+        // Assign free grid slots to any apps missing coordinates
+        const occupied = new Set();
+        unifiedPins.forEach(p => {
+          if (p.gridCol !== undefined && p.gridRow !== undefined) {
+            occupied.add(`${p.gridCol},${p.gridRow}`);
+          }
+        });
+        unifiedPins.forEach((p, idx) => {
+          if (p.gridCol === undefined || p.gridRow === undefined) {
+            for (let c = 0; c < 30; c++) {
+              let found = false;
+              for (let r = 0; r < 6; r++) {
+                if (!occupied.has(`${c},${r}`)) {
+                  p.gridCol = c;
+                  p.gridRow = r;
+                  occupied.add(`${c},${r}`);
+                  found = true;
+                  break;
+                }
+              }
+              if (found) break;
+            }
+            if (p.gridCol === undefined) {
+              p.gridCol = Math.floor(idx / 6);
+              p.gridRow = idx % 6;
+            }
+          }
+        });
 
         // Sync unified Pinned Apps back into all themes' shortcuts
         themes.forEach(t => {
@@ -453,7 +526,9 @@ class Store {
               title: p.title,
               url: p.url,
               icon: p.icon || p.favicon || '',
-              favicon: p.favicon || p.icon || ''
+              favicon: p.favicon || p.icon || '',
+              gridCol: p.gridCol,
+              gridRow: p.gridRow
             }));
           }
         });
@@ -473,7 +548,8 @@ class Store {
           ...parsed,
           settings: mergedSettings,
           themes,
-          bookmarks: unifiedPins
+          bookmarks: unifiedPins,
+          desktopApps: unifiedPins
         };
         this.saveData(data);
         return data;
@@ -488,6 +564,9 @@ class Store {
   saveData(data = this.data) {
     try {
       fs.mkdirSync(this.userDataPath, { recursive: true });
+      if (data && data.bookmarks) {
+        data.desktopApps = data.bookmarks;
+      }
       fs.writeFileSync(this.filePath, JSON.stringify(data, null, 2), 'utf-8');
     } catch (err) {
       console.error('Failed to save store data:', err);
@@ -501,7 +580,9 @@ class Store {
       title: p.title,
       url: p.url,
       icon: p.icon || p.favicon || '',
-      favicon: p.favicon || p.icon || ''
+      favicon: p.favicon || p.icon || '',
+      gridCol: p.gridCol,
+      gridRow: p.gridRow
     }));
     this.data.themes.forEach(t => {
       if (!t.newTab) t.newTab = {};
@@ -671,13 +752,13 @@ class Store {
     };
   }
 
-  // Pinned Apps (Global Bookmarks)
+  // Pinned Apps (Unified Bookmarks & Desktop Apps)
   getBookmarks() {
     return this.data.bookmarks || [];
   }
 
   addBookmark(bookmark) {
-    if (!bookmark || !bookmark.url) return this.data.bookmarks;
+    if (!bookmark || !bookmark.url) return this.getBookmarks();
     let iconUrl = bookmark.icon || bookmark.favicon || '';
     if (!iconUrl) {
       try {
@@ -687,27 +768,78 @@ class Store {
         iconUrl = 'assets/icon.png';
       }
     }
+
+    const normItem = normalizePinUrl(bookmark.url);
+    const existing = (this.data.bookmarks || []).find(b =>
+      normalizePinUrl(b.url) === normItem || (bookmark.id && b.id === bookmark.id)
+    );
+    if (existing) {
+      if (bookmark.title) existing.title = bookmark.title;
+      if (iconUrl) { existing.icon = iconUrl; existing.favicon = iconUrl; }
+      if (bookmark.gridCol !== undefined && !isNaN(bookmark.gridCol)) existing.gridCol = Number(bookmark.gridCol);
+      if (bookmark.gridRow !== undefined && !isNaN(bookmark.gridRow)) existing.gridRow = Number(bookmark.gridRow);
+      this.syncPinnedAppsToThemes();
+      this.saveData();
+      return this.data.bookmarks;
+    }
+
+    // Find next vacant grid cell (col, row) on desktop
+    const occupied = new Set((this.data.bookmarks || []).map(b => `${b.gridCol},${b.gridRow}`));
+    let freeCol = 0;
+    let freeRow = 0;
+    for (let c = 0; c < 30; c++) {
+      let found = false;
+      for (let r = 0; r < 6; r++) {
+        if (!occupied.has(`${c},${r}`)) {
+          freeCol = c;
+          freeRow = r;
+          found = true;
+          break;
+        }
+      }
+      if (found) break;
+    }
+
     const item = {
       id: bookmark.id || ('pin_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5)),
       title: bookmark.title || 'Untitled',
       url: bookmark.url,
       icon: iconUrl,
       favicon: iconUrl,
+      gridCol: (bookmark.gridCol !== undefined && !isNaN(bookmark.gridCol)) ? Number(bookmark.gridCol) : freeCol,
+      gridRow: (bookmark.gridRow !== undefined && !isNaN(bookmark.gridRow)) ? Number(bookmark.gridRow) : freeRow,
       createdAt: Date.now()
     };
-    const normItem = normalizePinUrl(item.url);
-    const exists = this.data.bookmarks.some(b => normalizePinUrl(b.url) === normItem);
-    if (!exists) {
-      this.data.bookmarks.push(item);
-      this.syncPinnedAppsToThemes();
-      this.saveData();
-    }
+    if (!Array.isArray(this.data.bookmarks)) this.data.bookmarks = [];
+    this.data.bookmarks.push(item);
+    this.syncPinnedAppsToThemes();
+    this.saveData();
     return this.data.bookmarks;
   }
 
   removeBookmark(idOrUrl) {
+    if (!idOrUrl) return this.data.bookmarks || [];
     const normTarget = normalizePinUrl(idOrUrl);
-    this.data.bookmarks = this.data.bookmarks.filter(b => b.id !== idOrUrl && b.url !== idOrUrl && normalizePinUrl(b.url) !== normTarget);
+    this.data.bookmarks = (this.data.bookmarks || []).filter(b =>
+      b.id !== idOrUrl && b.url !== idOrUrl && normalizePinUrl(b.url) !== normTarget
+    );
+    this.syncPinnedAppsToThemes();
+    this.saveData();
+    return this.data.bookmarks;
+  }
+
+  setBookmarks(bookmarks) {
+    if (!Array.isArray(bookmarks)) return this.data.bookmarks || [];
+    this.data.bookmarks = bookmarks.map((b, idx) => ({
+      id: b.id || ('pin_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5)),
+      title: b.title || 'Untitled',
+      url: b.url,
+      icon: b.icon || b.favicon || '',
+      favicon: b.favicon || b.icon || '',
+      gridCol: (b.gridCol !== undefined && !isNaN(b.gridCol)) ? Number(b.gridCol) : Math.floor(idx / 6),
+      gridRow: (b.gridRow !== undefined && !isNaN(b.gridRow)) ? Number(b.gridRow) : (idx % 6),
+      createdAt: b.createdAt || Date.now()
+    }));
     this.syncPinnedAppsToThemes();
     this.saveData();
     return this.data.bookmarks;
@@ -716,7 +848,24 @@ class Store {
   isBookmarked(url) {
     if (!url || url.startsWith('oni://')) return false;
     const normTarget = normalizePinUrl(url);
-    return this.data.bookmarks.some(b => b.url === url || normalizePinUrl(b.url) === normTarget);
+    return (this.data.bookmarks || []).some(b => b.url === url || normalizePinUrl(b.url) === normTarget);
+  }
+
+  // Desktop Apps layout methods (fully unified with Bookmarks)
+  getDesktopApps() {
+    return this.getBookmarks();
+  }
+
+  setDesktopApps(apps) {
+    return this.setBookmarks(apps);
+  }
+
+  addDesktopApp(app) {
+    return this.addBookmark(app);
+  }
+
+  removeDesktopApp(idOrUrl) {
+    return this.removeBookmark(idOrUrl);
   }
 
   // History

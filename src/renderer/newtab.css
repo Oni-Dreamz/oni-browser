@@ -535,32 +535,35 @@ body[data-layout="desktop"] {
   overflow: hidden;
 }
 
-/* Desktop App Icons Grid (Windows / macOS Desktop style) */
+/* Desktop App Icons Grid (Windows Desktop style snap-to-grid) */
 .os-desktop-icons {
-  display: grid;
-  grid-template-rows: repeat(auto-fill, 102px);
-  grid-auto-flow: column;
-  grid-auto-columns: 98px;
-  gap: 14px 16px;
-  align-content: start;
-  height: 100%;
+  position: absolute;
+  top: 22px;
+  left: 24px;
+  bottom: 84px;
+  right: 360px;
   z-index: 5;
+  pointer-events: none;
 }
 
 .os-app-tile {
+  position: absolute;
+  width: 90px;
+  height: 98px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: flex-start;
   gap: 7px;
-  padding: 10px 6px 8px;
+  padding: 8px 6px;
   border-radius: 12px;
   border: 1px solid transparent;
   cursor: pointer;
   text-decoration: none;
   color: var(--text-main);
-  transition: all 0.16s cubic-bezier(0.16, 1, 0.3, 1);
-  position: relative;
+  transition: transform 0.16s cubic-bezier(0.16, 1, 0.3, 1), background 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+  pointer-events: auto;
+  user-select: none;
 }
 
 .os-app-tile:hover {
@@ -574,6 +577,24 @@ body[data-layout="desktop"] {
   background: rgba(0, 255, 136, 0.15);
   border-color: rgba(0, 255, 136, 0.65);
   box-shadow: 0 0 16px rgba(0, 255, 136, 0.2);
+}
+
+.os-app-tile.dragging {
+  opacity: 0.35;
+  transform: scale(0.95);
+}
+
+.os-grid-highlight {
+  position: absolute;
+  width: 90px;
+  height: 98px;
+  border: 2px dashed var(--accent-green);
+  border-radius: 12px;
+  background: rgba(0, 255, 136, 0.1);
+  box-shadow: 0 0 16px rgba(0, 255, 136, 0.3);
+  pointer-events: none;
+  z-index: 4;
+  transition: top 0.05s ease, left 0.05s ease;
 }
 
 .os-app-icon-box {
@@ -629,11 +650,14 @@ body[data-layout="desktop"] {
 
 /* Desktop Widgets Panel (Right Side) */
 .os-widgets-panel {
+  position: absolute;
+  top: 22px;
+  right: 24px;
   width: 310px;
   display: flex;
   flex-direction: column;
   gap: 14px;
-  z-index: 5;
+  z-index: 10;
 }
 
 .os-widget {
@@ -897,35 +921,66 @@ body[data-layout="desktop"] {
 }
 
 .os-spotlight-results {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-  gap: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 240px;
+  overflow-y: auto;
 }
 
-.os-spotlight-item {
+.os-spotlight-suggestion {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
   background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(0, 255, 136, 0.22);
   border-radius: 8px;
   color: #fff;
-  text-decoration: none;
-  font-size: 12px;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all 0.15s ease;
+  font-size: 13px;
+  text-decoration: none;
 }
 
-.os-spotlight-item:hover {
+.os-spotlight-suggestion:hover {
   background: rgba(0, 255, 136, 0.14);
-  border-color: rgba(0, 255, 136, 0.4);
+  border-color: rgba(0, 255, 136, 0.55);
 }
 
-.os-spotlight-item img {
-  width: 18px;
-  height: 18px;
+.os-spotlight-suggestion-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.os-spotlight-suggestion-left svg {
+  width: 16px;
+  height: 16px;
+  stroke: var(--accent-green);
+  flex-shrink: 0;
+}
+
+.os-spotlight-suggestion-badge {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.08);
+  padding: 2px 7px;
   border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.os-spotlight-empty-hint {
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 10px;
+  text-align: center;
 }
 
 /* OS Forms & Buttons */
@@ -1075,15 +1130,60 @@ body[data-layout="desktop"] {
   color: var(--text-muted);
 }
 
-.os-kernel-badge {
+.os-kernel-badge,
+.os-start-edit-btn {
   font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 700;
   color: var(--accent-green);
   background: rgba(0, 255, 136, 0.12);
-  border: 1px solid rgba(0, 255, 136, 0.3);
-  padding: 3px 8px;
+  border: 1px solid rgba(0, 255, 136, 0.35);
+  padding: 3px 10px;
   border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  letter-spacing: 0.5px;
+}
+
+.os-start-edit-btn:hover {
+  background: rgba(0, 255, 136, 0.25);
+  border-color: var(--accent-green);
+  box-shadow: 0 0 10px rgba(0, 255, 136, 0.3);
+}
+
+.os-start-edit-btn.active {
+  background: var(--accent-green);
+  color: #04140b;
+  border-color: var(--accent-green);
+  box-shadow: 0 0 12px rgba(0, 255, 136, 0.5);
+}
+
+.os-start-app.editing {
+  cursor: grab;
+  border: 1px dashed rgba(0, 255, 136, 0.45);
+  background: rgba(0, 255, 136, 0.06);
+  border-radius: 8px;
+  animation: editPulse 2s infinite ease-in-out;
+}
+
+.os-start-app.editing:active {
+  cursor: grabbing;
+}
+
+.os-start-app.dragging {
+  opacity: 0.3;
+  transform: scale(0.92);
+}
+
+.os-start-app.drag-over {
+  border-color: var(--accent-green);
+  background: rgba(0, 255, 136, 0.25);
+  transform: scale(1.05);
+}
+
+@keyframes editPulse {
+  0%, 100% { border-color: rgba(0, 255, 136, 0.3); }
+  50% { border-color: rgba(0, 255, 136, 0.7); }
 }
 
 .os-start-section-title {
@@ -1225,6 +1325,17 @@ body[data-layout="desktop"] {
   height: 1px;
   background: rgba(255, 255, 255, 0.08);
   margin: 4px 0;
+}
+
+.os-ctx-item.danger,
+.os-ctx-item-danger {
+  color: #ef4444 !important;
+}
+
+.os-ctx-item.danger:hover,
+.os-ctx-item-danger:hover {
+  background: rgba(239, 68, 68, 0.16) !important;
+  color: #f87171 !important;
 }
 
 /* Bottom Glassmorphic OS Dock */

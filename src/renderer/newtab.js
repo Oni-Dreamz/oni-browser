@@ -22,7 +22,16 @@
   const osWidgetsPanel = document.getElementById('os-widgets-panel');
   const osStartMenu = document.getElementById('os-start-menu');
   const osStartAppsGrid = document.getElementById('os-start-apps-grid');
+  const osStartBtnEdit = document.getElementById('os-start-btn-edit');
+  let isStartMenuEditMode = false;
+  let draggedAppIndex = null;
   const osContextMenu = document.getElementById('os-context-menu');
+  const osSearchContextMenu = document.getElementById('os-search-context-menu');
+  const osAppContextMenu = document.getElementById('os-app-context-menu');
+  const osGridHighlight = document.getElementById('os-grid-highlight');
+  let draggedDesktopAppId = null;
+  let activeContextApp = null;
+  let activeContextSource = 'desktop';
 
   const osMenubarClock = document.getElementById('os-menubar-clock');
   const osMenubarDate = document.getElementById('os-menubar-date');
@@ -52,17 +61,19 @@
   let currentEngineIndex = 0;
   let currentThemeObj = null;
 
-  // Default Curated Speed Dials / Desktop Apps
-  let activeShortcuts = [
-    { title: 'GitHub', url: 'https://github.com', icon: 'https://github.githubassets.com/favicons/favicon.png' },
-    { title: 'YouTube', url: 'https://youtube.com', icon: 'https://www.youtube.com/s/desktop/f7125368/img/favicon_144x144.png' },
-    { title: 'Reddit', url: 'https://reddit.com', icon: 'https://www.redditstatic.com/shreddit/assets/favicon/192x192.png' },
-    { title: 'Wikipedia', url: 'https://wikipedia.org', icon: 'https://en.wikipedia.org/static/favicon/wikipedia.ico' },
-    { title: 'Twitch', url: 'https://twitch.tv', icon: 'https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png' },
-    { title: 'Hacker News', url: 'https://news.ycombinator.com', icon: 'https://news.ycombinator.com/favicon.ico' },
-    { title: 'ChatGPT', url: 'https://chatgpt.com', icon: 'https://oaistatic-cdn.azureedge.net/chatgpt/favicon.ico' },
-    { title: 'Claude', url: 'https://claude.ai', icon: 'https://claude.ai/favicon.ico' }
+  // Unified Pinned Apps (Desktop & Start Menu synchronized)
+  let pinnedApps = [
+    { id: 'pin_github', title: 'GitHub', url: 'https://github.com', icon: 'https://github.githubassets.com/favicons/favicon.png', favicon: 'https://github.githubassets.com/favicons/favicon.png', gridCol: 0, gridRow: 0 },
+    { id: 'pin_youtube', title: 'YouTube', url: 'https://youtube.com', icon: 'https://www.youtube.com/s/desktop/f7125368/img/favicon_144x144.png', favicon: 'https://www.youtube.com/s/desktop/f7125368/img/favicon_144x144.png', gridCol: 0, gridRow: 1 },
+    { id: 'pin_reddit', title: 'Reddit', url: 'https://reddit.com', icon: 'https://www.redditstatic.com/shreddit/assets/favicon/192x192.png', favicon: 'https://www.redditstatic.com/shreddit/assets/favicon/192x192.png', gridCol: 0, gridRow: 2 },
+    { id: 'pin_wikipedia', title: 'Wikipedia', url: 'https://wikipedia.org', icon: 'https://en.wikipedia.org/static/favicon/wikipedia.ico', favicon: 'https://en.wikipedia.org/static/favicon/wikipedia.ico', gridCol: 0, gridRow: 3 },
+    { id: 'pin_twitch', title: 'Twitch', url: 'https://twitch.tv', icon: 'https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png', favicon: 'https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png', gridCol: 0, gridRow: 4 },
+    { id: 'pin_hn', title: 'Hacker News', url: 'https://news.ycombinator.com', icon: 'https://news.ycombinator.com/favicon.ico', favicon: 'https://news.ycombinator.com/favicon.ico', gridCol: 0, gridRow: 5 },
+    { id: 'pin_chatgpt', title: 'ChatGPT', url: 'https://chatgpt.com', icon: 'https://oaistatic-cdn.azureedge.net/chatgpt/favicon.ico', favicon: 'https://oaistatic-cdn.azureedge.net/chatgpt/favicon.ico', gridCol: 1, gridRow: 0 },
+    { id: 'pin_claude', title: 'Claude', url: 'https://claude.ai', icon: 'https://claude.ai/favicon.ico', favicon: 'https://claude.ai/favicon.ico', gridCol: 1, gridRow: 1 }
   ];
+  let desktopApps = pinnedApps;
+  let activeShortcuts = pinnedApps;
 
   const PAGE_MODE = new URLSearchParams(window.location.search).get('mode');
   const IS_FORCED_CLASSIC_NEWTAB = PAGE_MODE === 'classic';
@@ -267,12 +278,20 @@
       }
     }
 
-    // 6. Shortcuts & Desktop Apps
+    // 6. Pinned Apps & Desktop Layout
     if (nt.shortcuts) {
       const shortcutsSection = document.querySelector('.shortcuts-section');
       if (shortcutsSection) shortcutsSection.style.display = nt.shortcuts.visible === false ? 'none' : '';
-      if (Array.isArray(nt.shortcuts.items)) {
-        activeShortcuts = nt.shortcuts.items;
+      if (Array.isArray(nt.shortcuts.items) && (!pinnedApps || pinnedApps.length === 0)) {
+        pinnedApps = nt.shortcuts.items.map((p, idx) => ({
+          id: p.id || ('pin_' + idx),
+          title: p.title || 'Untitled',
+          url: p.url,
+          icon: p.icon || p.favicon || '',
+          favicon: p.favicon || p.icon || '',
+          gridCol: (p.gridCol !== undefined && !isNaN(p.gridCol)) ? Number(p.gridCol) : Math.floor(idx / 6),
+          gridRow: (p.gridRow !== undefined && !isNaN(p.gridRow)) ? Number(p.gridRow) : (idx % 6)
+        }));
       }
     }
     renderShortcuts();
@@ -305,7 +324,7 @@
   function renderShortcuts() {
     if (!shortcutsGrid) return;
     shortcutsGrid.innerHTML = '';
-    activeShortcuts.forEach(s => {
+    pinnedApps.forEach(s => {
       const card = document.createElement('a');
       card.className = 'shortcut-card';
       card.href = s.url;
@@ -315,7 +334,7 @@
 
       const img = document.createElement('img');
       img.className = 'shortcut-icon';
-      img.src = s.icon;
+      img.src = s.icon || s.favicon || '../../assets/app-icon.png';
       img.alt = s.title;
       img.onerror = () => {
         img.src = '../../assets/app-icon.png';
@@ -333,26 +352,80 @@
     });
   }
 
+  // Context Menu Helpers
+  function showSearchContextMenu(clientX, clientY) {
+    if (!osSearchContextMenu) return;
+    hideAllContextMenus();
+    const x = Math.min(window.innerWidth - 180, Math.max(8, clientX));
+    const y = Math.min(window.innerHeight - 190, Math.max(8, clientY));
+    osSearchContextMenu.style.left = `${x}px`;
+    osSearchContextMenu.style.top = `${y}px`;
+    osSearchContextMenu.classList.remove('hidden');
+  }
+
+  function showAppContextMenu(clientX, clientY, app, source = 'desktop') {
+    if (!osAppContextMenu) return;
+    activeContextApp = app;
+    activeContextSource = source;
+    hideAllContextMenus();
+    const delBtn = document.getElementById('ctx-app-delete');
+    if (delBtn) {
+      delBtn.textContent = '🗑 Unpin App';
+    }
+    const x = Math.min(window.innerWidth - 200, Math.max(8, clientX));
+    const y = Math.min(window.innerHeight - 220, Math.max(8, clientY));
+    osAppContextMenu.style.left = `${x}px`;
+    osAppContextMenu.style.top = `${y}px`;
+    osAppContextMenu.classList.remove('hidden');
+  }
+
+  function hideAllContextMenus() {
+    if (osContextMenu) osContextMenu.classList.add('hidden');
+    if (osSearchContextMenu) osSearchContextMenu.classList.add('hidden');
+    if (osAppContextMenu) osAppContextMenu.classList.add('hidden');
+  }
+
   // =========================================================
   // ONI OS DESKTOP ENVIRONMENT RENDERING & INTERACTION
   // =========================================================
-  function renderOniOsDesktop() {
-    if (!osDesktopIcons || !osStartAppsGrid) return;
-
-    // 1. Desktop App Icons Grid
+  function renderDesktopApps() {
+    if (!osDesktopIcons) return;
     osDesktopIcons.innerHTML = '';
-    activeShortcuts.forEach((app, idx) => {
+    const CELL_W = 100;
+    const CELL_H = 108;
+
+    pinnedApps.forEach((app, idx) => {
       const tile = document.createElement('a');
       tile.className = 'os-app-tile';
       tile.href = app.url;
-      tile.dataset.index = idx;
+      tile.dataset.id = app.id || `pin_${idx}`;
       tile.title = `${app.title}\n${app.url}`;
+
+      const col = (app.gridCol !== undefined && !isNaN(app.gridCol)) ? Number(app.gridCol) : Math.floor(idx / 6);
+      const row = (app.gridRow !== undefined && !isNaN(app.gridRow)) ? Number(app.gridRow) : (idx % 6);
+      tile.style.left = `${col * CELL_W}px`;
+      tile.style.top = `${row * CELL_H}px`;
+
+      tile.draggable = true;
+
+      tile.addEventListener('dragstart', (e) => {
+        draggedDesktopAppId = app.id;
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', app.id);
+        setTimeout(() => tile.classList.add('dragging'), 0);
+      });
+
+      tile.addEventListener('dragend', () => {
+        tile.classList.remove('dragging');
+        if (osGridHighlight) osGridHighlight.classList.add('hidden');
+        draggedDesktopAppId = null;
+      });
 
       const iconBox = document.createElement('div');
       iconBox.className = 'os-app-icon-box';
 
       const img = document.createElement('img');
-      img.src = app.icon || '../../assets/app-icon.png';
+      img.src = app.icon || app.favicon || '../../assets/app-icon.png';
       img.alt = app.title;
       img.onerror = () => { img.src = '../../assets/app-icon.png'; };
       iconBox.appendChild(img);
@@ -369,18 +442,83 @@
         launchUrlFromDesktop(app.url);
       });
 
+      tile.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        showAppContextMenu(e.clientX, e.clientY, app, 'desktop');
+      });
+
       osDesktopIcons.appendChild(tile);
     });
+  }
 
-    // 2. Start Menu Pinned Apps Grid
+  function renderStartMenuApps() {
+    if (!osStartAppsGrid) return;
     osStartAppsGrid.innerHTML = '';
-    activeShortcuts.forEach(app => {
+    pinnedApps.forEach((app, index) => {
       const item = document.createElement('a');
-      item.className = 'os-start-app';
+      item.className = 'os-start-app' + (isStartMenuEditMode ? ' editing' : '');
       item.href = app.url;
+      item.dataset.index = index;
+
+      if (isStartMenuEditMode) {
+        item.draggable = true;
+        item.title = 'Drag to reorder';
+
+        item.addEventListener('dragstart', (e) => {
+          draggedAppIndex = index;
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', String(index));
+          setTimeout(() => item.classList.add('dragging'), 0);
+        });
+
+        item.addEventListener('dragend', () => {
+          item.classList.remove('dragging');
+          document.querySelectorAll('.os-start-app').forEach(el => el.classList.remove('drag-over'));
+          draggedAppIndex = null;
+        });
+
+        item.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          item.classList.add('drag-over');
+
+          // Auto-scroll when dragging near top/bottom edges
+          const rect = osStartAppsGrid.getBoundingClientRect();
+          const edgeThreshold = 45;
+          const y = e.clientY;
+          if (y - rect.top < edgeThreshold) {
+            const factor = Math.max(1, (edgeThreshold - (y - rect.top)) / 5);
+            osStartAppsGrid.scrollTop -= factor * 5;
+          } else if (rect.bottom - y < edgeThreshold) {
+            const factor = Math.max(1, (edgeThreshold - (rect.bottom - y)) / 5);
+            osStartAppsGrid.scrollTop += factor * 5;
+          }
+        });
+
+        item.addEventListener('dragleave', () => {
+          item.classList.remove('drag-over');
+        });
+
+        item.addEventListener('drop', async (e) => {
+          e.preventDefault();
+          item.classList.remove('drag-over');
+          const fromIndex = draggedAppIndex !== null ? draggedAppIndex : parseInt(e.dataTransfer.getData('text/plain'), 10);
+          const toIndex = index;
+          if (fromIndex !== null && !isNaN(fromIndex) && fromIndex !== toIndex) {
+            const [moved] = pinnedApps.splice(fromIndex, 1);
+            pinnedApps.splice(toIndex, 0, moved);
+            renderShortcuts();
+            renderStartMenuApps();
+            if (window.oniAPI && window.oniAPI.setBookmarks) {
+              await window.oniAPI.setBookmarks(pinnedApps);
+            }
+          }
+        });
+      }
 
       const img = document.createElement('img');
-      img.src = app.icon || '../../assets/app-icon.png';
+      img.src = app.icon || app.favicon || '../../assets/app-icon.png';
       img.alt = app.title;
       img.onerror = () => { img.src = '../../assets/app-icon.png'; };
 
@@ -392,43 +530,75 @@
 
       item.addEventListener('click', (e) => {
         e.preventDefault();
+        if (isStartMenuEditMode) return;
+        closeStartMenu();
         launchUrlFromDesktop(app.url);
+      });
+
+      // Right-click context menu on start menu app
+      item.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        showAppContextMenu(e.clientX, e.clientY, app, 'start');
       });
 
       osStartAppsGrid.appendChild(item);
     });
+  }
 
+  function renderOniOsDesktop() {
+    renderDesktopApps();
+    renderStartMenuApps();
     renderSpotlightApps('');
   }
 
   function renderSpotlightApps(filterText) {
     if (!osSpotlightResults) return;
-    const q = (filterText || '').toLowerCase().trim();
-    const filtered = activeShortcuts.filter(a => !q || a.title.toLowerCase().includes(q) || a.url.toLowerCase().includes(q));
-
+    const query = (filterText || '').trim();
     osSpotlightResults.innerHTML = '';
-    filtered.forEach(app => {
-      const item = document.createElement('a');
-      item.className = 'os-spotlight-item';
-      item.href = app.url;
 
-      const img = document.createElement('img');
-      img.src = app.icon || '../../assets/app-icon.png';
-      img.onerror = () => { img.src = '../../assets/app-icon.png'; };
+    if (!query) {
+      osSpotlightResults.innerHTML = '<div class="os-spotlight-empty-hint">Type a web address or search query and press Enter.</div>';
+      return;
+    }
 
-      const span = document.createElement('span');
-      span.textContent = app.title;
+    const isUrl = /^https?:\/\//i.test(query) || /^file:\/\//i.test(query) || /^([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(:\d+)?(\/.*)?$/i.test(query) || /^localhost(:\d+)?(\/.*)?$/i.test(query);
+    const destUrl = isUrl ? (/^https?:\/\//i.test(query) ? query : `https://${query}`) : query;
+    const engineName = (activeEngine && activeEngine.name) ? activeEngine.name : 'Google';
 
-      item.appendChild(img);
-      item.appendChild(span);
-
-      item.addEventListener('click', (e) => {
-        e.preventDefault();
-        launchUrlFromDesktop(app.url);
+    if (isUrl) {
+      const navItem = document.createElement('div');
+      navItem.className = 'os-spotlight-suggestion';
+      navItem.innerHTML = `
+        <div class="os-spotlight-suggestion-left">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+          <span style="font-weight:600;">Go to:</span>
+          <span style="color:var(--accent-green); overflow:hidden; text-overflow:ellipsis;">${destUrl}</span>
+        </div>
+        <span class="os-spotlight-suggestion-badge">Enter ↵</span>
+      `;
+      navItem.addEventListener('click', () => {
+        closeOsWindow('os-win-spotlight');
+        executeSearchOrNavigate(query);
       });
+      osSpotlightResults.appendChild(navItem);
+    }
 
-      osSpotlightResults.appendChild(item);
+    const searchItem = document.createElement('div');
+    searchItem.className = 'os-spotlight-suggestion';
+    searchItem.innerHTML = `
+      <div class="os-spotlight-suggestion-left">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <span style="font-weight:600;">Search ${engineName}:</span>
+        <span style="color:#f8fafc; overflow:hidden; text-overflow:ellipsis;">"${query}"</span>
+      </div>
+      <span class="os-spotlight-suggestion-badge">Search</span>
+    `;
+    searchItem.addEventListener('click', () => {
+      closeOsWindow('os-win-spotlight');
+      executeSearchOrNavigate(query);
     });
+    osSpotlightResults.appendChild(searchItem);
   }
 
   async function openOsWindow(winId) {
@@ -457,6 +627,26 @@
       await renderOsDownloadsWindow();
     } else if (winId === 'os-win-settings') {
       await renderOsSettingsWindow();
+    } else if (winId === 'os-win-add-app') {
+      const titleEl = document.getElementById('os-app-title');
+      const urlEl = document.getElementById('os-app-url');
+      const iconEl = document.getElementById('os-app-icon');
+      if (titleEl) titleEl.value = '';
+      if (urlEl) urlEl.value = '';
+      if (iconEl) iconEl.value = '';
+      if (titleEl) setTimeout(() => titleEl.focus(), 50);
+    }
+  }
+
+  function closeStartMenu() {
+    if (osStartMenu) osStartMenu.classList.add('hidden');
+    if (isStartMenuEditMode) {
+      isStartMenuEditMode = false;
+      if (osStartBtnEdit) {
+        osStartBtnEdit.textContent = 'Edit';
+        osStartBtnEdit.classList.remove('active');
+      }
+      renderStartMenuApps();
     }
   }
 
@@ -818,7 +1008,11 @@
     if (topStartBtn) {
       topStartBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        osStartMenu.classList.toggle('hidden');
+        if (osStartMenu && !osStartMenu.classList.contains('hidden')) {
+          closeStartMenu();
+        } else if (osStartMenu) {
+          osStartMenu.classList.remove('hidden');
+        }
       });
     }
 
@@ -838,7 +1032,7 @@
     const startNewTab = document.getElementById('os-start-btn-newtab');
     if (startNewTab) {
       startNewTab.addEventListener('click', () => {
-        if (osStartMenu) osStartMenu.classList.add('hidden');
+        closeStartMenu();
         if (window.oniAPI && window.oniAPI.createTab) {
           window.oniAPI.createTab('oni://newtab');
         }
@@ -848,12 +1042,22 @@
     const startPin = document.getElementById('os-start-btn-pin') || document.getElementById('os-start-btn-control');
     if (startPin) {
       startPin.addEventListener('click', () => {
-        if (osStartMenu) osStartMenu.classList.add('hidden');
+        closeStartMenu();
         if (window.oniAPI && window.oniAPI.triggerOsAction) {
           window.oniAPI.triggerOsAction('pin-app');
         } else {
           openOsWindow('os-win-add-app');
         }
+      });
+    }
+
+    if (osStartBtnEdit) {
+      osStartBtnEdit.addEventListener('click', (e) => {
+        e.stopPropagation();
+        isStartMenuEditMode = !isStartMenuEditMode;
+        osStartBtnEdit.textContent = isStartMenuEditMode ? 'Done' : 'Edit';
+        osStartBtnEdit.classList.toggle('active', isStartMenuEditMode);
+        renderStartMenuApps();
       });
     }
 
@@ -914,9 +1118,9 @@
         }
 
         if (window.oniAPI && window.oniAPI.addBookmark) {
-          await window.oniAPI.addBookmark({ title, url, favicon: icon });
+          await window.oniAPI.addBookmark({ title, url, icon, favicon: icon });
         } else {
-          activeShortcuts.push({ title, url, icon });
+          pinnedApps.push({ title, url, icon, favicon: icon });
           renderShortcuts();
           renderOniOsDesktop();
         }
@@ -973,16 +1177,71 @@
       });
     });
 
-    // Home Right-Click Context Menu
+    // Home Right-Click Context Menu & Desktop Grid Drag Drop
     const workspace = document.getElementById('os-workspace');
     if (workspace && osContextMenu) {
       workspace.addEventListener('contextmenu', (e) => {
+        if (e.target.closest('.os-app-tile')) return;
         e.preventDefault();
+        hideAllContextMenus();
         const x = Math.min(e.clientX, window.innerWidth - 230);
         const y = Math.min(e.clientY, window.innerHeight - 260);
         osContextMenu.style.left = `${x}px`;
         osContextMenu.style.top = `${y}px`;
         osContextMenu.classList.remove('hidden');
+      });
+
+      workspace.addEventListener('dragover', (e) => {
+        if (!draggedDesktopAppId || !osDesktopIcons) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        const rect = osDesktopIcons.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        const maxCols = Math.max(1, Math.floor(rect.width / 100));
+        const maxRows = Math.max(1, Math.floor(rect.height / 108));
+        const col = Math.min(maxCols - 1, Math.max(0, Math.floor(x / 100)));
+        const row = Math.min(maxRows - 1, Math.max(0, Math.floor(y / 108)));
+        if (osGridHighlight) {
+          osGridHighlight.style.left = `${col * 100 + 24}px`;
+          osGridHighlight.style.top = `${row * 108 + 22}px`;
+          osGridHighlight.classList.remove('hidden');
+        }
+      });
+
+      workspace.addEventListener('dragleave', (e) => {
+        if (e.target === workspace && osGridHighlight) {
+          osGridHighlight.classList.add('hidden');
+        }
+      });
+
+      workspace.addEventListener('drop', async (e) => {
+        if (!draggedDesktopAppId || !osDesktopIcons) return;
+        e.preventDefault();
+        if (osGridHighlight) osGridHighlight.classList.add('hidden');
+        const rect = osDesktopIcons.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        const maxCols = Math.max(1, Math.floor(rect.width / 100));
+        const maxRows = Math.max(1, Math.floor(rect.height / 108));
+        const col = Math.min(maxCols - 1, Math.max(0, Math.floor(x / 100)));
+        const row = Math.min(maxRows - 1, Math.max(0, Math.floor(y / 108)));
+
+        const draggedApp = pinnedApps.find(a => a.id === draggedDesktopAppId);
+        if (!draggedApp) return;
+
+        const occupant = pinnedApps.find(a => a.id !== draggedApp.id && a.gridCol === col && a.gridRow === row);
+        if (occupant) {
+          occupant.gridCol = draggedApp.gridCol;
+          occupant.gridRow = draggedApp.gridRow;
+        }
+        draggedApp.gridCol = col;
+        draggedApp.gridRow = row;
+
+        renderDesktopApps();
+        if (window.oniAPI && window.oniAPI.setBookmarks) {
+          await window.oniAPI.setBookmarks(pinnedApps);
+        }
       });
     }
 
@@ -1003,15 +1262,143 @@
       if (window.oniAPI && window.oniAPI.triggerOsAction) window.oniAPI.triggerOsAction('settings');
       else openOsWindow('os-win-settings');
     });
-    document.getElementById('ctx-refresh-desktop')?.addEventListener('click', () => renderOniOsDesktop());
+    document.getElementById('ctx-refresh-desktop')?.addEventListener('click', () => renderDesktopApps());
 
-    // Close Start Menu & Context Menu on outside click
-    document.addEventListener('click', (e) => {
-      if (osContextMenu && !osContextMenu.classList.contains('hidden')) {
-        osContextMenu.classList.add('hidden');
+    // Search Input Context Menu Actions
+    if (osSpotlightInput) {
+      osSpotlightInput.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        showSearchContextMenu(e.clientX, e.clientY);
+      });
+    }
+
+    document.getElementById('ctx-search-cut')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      hideAllContextMenus();
+      if (!osSpotlightInput) return;
+      const start = osSpotlightInput.selectionStart;
+      const end = osSpotlightInput.selectionEnd;
+      const sel = osSpotlightInput.value.substring(start, end);
+      if (sel && window.oniAPI && window.oniAPI.writeClipboardText) {
+        window.oniAPI.writeClipboardText(sel);
+        osSpotlightInput.value = osSpotlightInput.value.substring(0, start) + osSpotlightInput.value.substring(end);
+        osSpotlightInput.setSelectionRange(start, start);
+        renderSpotlightApps(osSpotlightInput.value);
       }
+    });
+
+    document.getElementById('ctx-search-copy')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      hideAllContextMenus();
+      if (!osSpotlightInput) return;
+      const sel = osSpotlightInput.value.substring(osSpotlightInput.selectionStart, osSpotlightInput.selectionEnd) || osSpotlightInput.value;
+      if (sel && window.oniAPI && window.oniAPI.writeClipboardText) {
+        window.oniAPI.writeClipboardText(sel);
+      }
+    });
+
+    document.getElementById('ctx-search-paste')?.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      hideAllContextMenus();
+      if (!osSpotlightInput) return;
+      if (window.oniAPI && window.oniAPI.readClipboardText) {
+        const text = await window.oniAPI.readClipboardText();
+        if (text) {
+          const start = osSpotlightInput.selectionStart || 0;
+          const end = osSpotlightInput.selectionEnd || 0;
+          const val = osSpotlightInput.value || '';
+          osSpotlightInput.value = val.substring(0, start) + text + val.substring(end);
+          const newPos = start + text.length;
+          osSpotlightInput.setSelectionRange(newPos, newPos);
+          renderSpotlightApps(osSpotlightInput.value);
+        }
+      }
+    });
+
+    document.getElementById('ctx-search-select-all')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      hideAllContextMenus();
+      if (osSpotlightInput) osSpotlightInput.select();
+    });
+
+    document.getElementById('ctx-search-clear')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      hideAllContextMenus();
+      if (osSpotlightInput) {
+        osSpotlightInput.value = '';
+        renderSpotlightApps('');
+        osSpotlightInput.focus();
+      }
+    });
+
+    // App Context Menu Actions (Desktop & Start Menu)
+    document.getElementById('ctx-app-open')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      hideAllContextMenus();
+      if (!activeContextApp) return;
+      closeStartMenu();
+      launchUrlFromDesktop(activeContextApp.url);
+    });
+
+    document.getElementById('ctx-app-open-tab')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      hideAllContextMenus();
+      if (!activeContextApp) return;
+      closeStartMenu();
+      if (window.oniAPI && window.oniAPI.createTab) {
+        window.oniAPI.createTab(activeContextApp.url);
+      }
+    });
+
+    document.getElementById('ctx-app-copy-link')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      hideAllContextMenus();
+      if (activeContextApp && window.oniAPI && window.oniAPI.writeClipboardText) {
+        window.oniAPI.writeClipboardText(activeContextApp.url);
+      }
+    });
+
+    document.getElementById('ctx-app-edit')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      hideAllContextMenus();
+      if (!activeContextApp) return;
+      const titleEl = document.getElementById('os-app-title');
+      const urlEl = document.getElementById('os-app-url');
+      const iconEl = document.getElementById('os-app-icon');
+      if (titleEl) titleEl.value = activeContextApp.title || '';
+      if (urlEl) urlEl.value = activeContextApp.url || '';
+      if (iconEl) iconEl.value = activeContextApp.icon || activeContextApp.favicon || '';
+      openOsWindow('os-win-add-app');
+    });
+
+    document.getElementById('ctx-app-delete')?.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      hideAllContextMenus();
+      if (!activeContextApp) return;
+      const targetId = activeContextApp.id;
+      const targetUrl = activeContextApp.url;
+      pinnedApps = pinnedApps.filter(a => a.id !== targetId && a.url !== targetUrl);
+      renderDesktopApps();
+      renderStartMenuApps();
+      renderShortcuts();
+      if (window.oniAPI && window.oniAPI.removeBookmark) {
+        await window.oniAPI.removeBookmark(targetId || targetUrl);
+      }
+    });
+
+    // Mousewheel scroll while dragging in Start Menu
+    window.addEventListener('wheel', (e) => {
+      if (draggedAppIndex !== null && osStartAppsGrid) {
+        osStartAppsGrid.scrollTop += e.deltaY;
+      }
+    }, { passive: true });
+
+    // Close Start Menu & Context Menus on outside click
+    document.addEventListener('click', (e) => {
+      hideAllContextMenus();
       if (osStartMenu && !osStartMenu.classList.contains('hidden') && !osStartMenu.contains(e.target)) {
-        osStartMenu.classList.add('hidden');
+        closeStartMenu();
       }
     });
 
@@ -1023,8 +1410,8 @@
           openOsWindow('os-win-spotlight');
         }
       } else if (e.key === 'Escape') {
-        if (osStartMenu) osStartMenu.classList.add('hidden');
-        if (osContextMenu) osContextMenu.classList.add('hidden');
+        hideAllContextMenus();
+        closeStartMenu();
         closeOsWindow('os-win-spotlight');
       }
     });
@@ -1049,20 +1436,26 @@
   function handleOsAction(action) {
     if (!action) return;
     if (action === 'start-menu') {
-      if (osStartMenu) osStartMenu.classList.toggle('hidden');
+      if (osStartMenu) {
+        if (!osStartMenu.classList.contains('hidden')) {
+          closeStartMenu();
+        } else {
+          osStartMenu.classList.remove('hidden');
+        }
+      }
     } else if (action === 'start-menu-open') {
       if (osStartMenu) osStartMenu.classList.remove('hidden');
     } else if (action === 'home' || action === 'desktop') {
-      if (osStartMenu) osStartMenu.classList.add('hidden');
+      closeStartMenu();
       document.querySelectorAll('.os-window').forEach(w => w.classList.add('hidden'));
     } else if (action === 'search' || action === 'spotlight') {
-      if (osStartMenu) osStartMenu.classList.add('hidden');
+      closeStartMenu();
       openOsWindow('os-win-spotlight');
     } else if (action === 'history') {
-      if (osStartMenu) osStartMenu.classList.add('hidden');
+      closeStartMenu();
       openOsWindow('os-win-history');
     } else if (action === 'downloads') {
-      if (osStartMenu) osStartMenu.classList.add('hidden');
+      closeStartMenu();
       const win = document.getElementById('os-win-downloads');
       if (win && !win.classList.contains('hidden')) {
         closeOsWindow('os-win-downloads');
@@ -1070,10 +1463,10 @@
         openOsWindow('os-win-downloads');
       }
     } else if (action === 'settings') {
-      if (osStartMenu) osStartMenu.classList.add('hidden');
+      closeStartMenu();
       openOsWindow('os-win-settings');
     } else if (action === 'pin-app' || action === 'add-app') {
-      if (osStartMenu) osStartMenu.classList.add('hidden');
+      closeStartMenu();
       openOsWindow('os-win-add-app');
     }
   }
@@ -1101,22 +1494,34 @@
 
     if (window.oniAPI) {
       try {
+        const handlePinnedAppsUpdate = (bms) => {
+          if (Array.isArray(bms)) {
+            pinnedApps = bms.map((b, idx) => ({
+              id: b.id || ('pin_' + idx),
+              title: b.title || 'Untitled',
+              url: b.url,
+              icon: b.icon || b.favicon || '',
+              favicon: b.favicon || b.icon || '',
+              gridCol: (b.gridCol !== undefined && !isNaN(b.gridCol)) ? Number(b.gridCol) : Math.floor(idx / 6),
+              gridRow: (b.gridRow !== undefined && !isNaN(b.gridRow)) ? Number(b.gridRow) : (idx % 6)
+            }));
+            renderDesktopApps();
+            renderStartMenuApps();
+            renderShortcuts();
+          }
+        };
+
         if (window.oniAPI.getBookmarks) {
           const bms = await window.oniAPI.getBookmarks();
           if (Array.isArray(bms) && bms.length > 0) {
-            activeShortcuts = bms.map(b => ({ title: b.title, url: b.url, icon: b.favicon || b.icon }));
-            renderShortcuts();
-            renderOniOsDesktop();
+            handlePinnedAppsUpdate(bms);
           }
         }
         if (window.oniAPI.onBookmarksUpdated) {
-          window.oniAPI.onBookmarksUpdated((bms) => {
-            if (Array.isArray(bms)) {
-              activeShortcuts = bms.map(b => ({ title: b.title, url: b.url, icon: b.favicon || b.icon }));
-              renderShortcuts();
-              renderOniOsDesktop();
-            }
-          });
+          window.oniAPI.onBookmarksUpdated(handlePinnedAppsUpdate);
+        }
+        if (window.oniAPI.onDesktopAppsUpdated) {
+          window.oniAPI.onDesktopAppsUpdated(handlePinnedAppsUpdate);
         }
 
         const [activeTheme, shieldStats] = await Promise.all([
