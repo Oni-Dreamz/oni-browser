@@ -64,31 +64,31 @@
       </div>
 
       <div class="theme-list" id="page-theme-list">
-        <div class="theme-card active" data-theme-id="classic">
+        <div class="theme-card active" data-theme-id="oni-os">
           <div class="theme-card-top">
             <div class="theme-card-title-row">
-              <span class="theme-card-name">Classic</span>
+              <span class="theme-card-name">Oni OS</span>
               <span class="theme-badge">Active</span>
             </div>
             <div class="theme-swatches">
-              <span class="theme-swatch" style="background: #0a0b0f;"></span>
-              <span class="theme-swatch" style="background: #12141e;"></span>
+              <span class="theme-swatch" style="background: #08090d;"></span>
+              <span class="theme-swatch" style="background: rgba(14, 18, 28, 0.72);"></span>
               <span class="theme-swatch" style="background: #00ff88;"></span>
               <span class="theme-swatch" style="background: #00e5ff;"></span>
             </div>
           </div>
-          <div class="theme-card-desc">Original Oni Browser configuration — cyber-emerald accents, dark glassmorphic chrome, kanji clock dashboard, and active Oni Shield.</div>
+          <div class="theme-card-desc">Desktop operating system experience featuring bottom app dock, top system bar, and quick workspace access.</div>
           <div class="theme-construct-tags">
             <span class="theme-construct-tag">Chrome: top / pill</span>
-            <span class="theme-construct-tag">Dashboard: Kanji Clock</span>
-            <span class="theme-construct-tag">Engine: duckduckgo</span>
+            <span class="theme-construct-tag">Home: OS Desktop + App Dock</span>
+            <span class="theme-construct-tag">Engine: google</span>
             <span class="theme-construct-tag">Shield: Enabled</span>
           </div>
         </div>
       </div>
 
       <div class="theme-save-row">
-        <input type="text" id="page-theme-name" class="setting-input" value="Classic" placeholder="Theme name (e.g. Classic)" style="flex: 1;">
+        <input type="text" id="page-theme-name" class="setting-input" value="Oni OS" placeholder="Theme name (e.g. Oni OS)" style="flex: 1;">
         <button id="page-btn-save-theme" class="btn-primary" style="white-space: nowrap;">Save Current Config</button>
       </div>
       <div id="page-theme-status" class="theme-status-msg hidden"></div>
@@ -121,6 +121,39 @@
         <input type="checkbox" id="setting-shield" checked>
         <span class="slider round"></span>
       </label>
+    </div>
+
+    <div class="setting-group" style="padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.06);">
+      <div class="setting-label">Privacy and Security</div>
+      <div class="setting-desc">Clear local cookies, cached network assets, storage, and browsing logs.</div>
+      <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 10px; padding: 14px; margin-top: 10px;">
+        <div style="font-weight: 600; font-size: 13px; color: #fff; margin-bottom: 2px;">Clear Browsing Data</div>
+        <div style="font-size: 11.5px; color: var(--text-muted); margin-bottom: 12px;">Delete history, cookies, cache, and more.</div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; margin-bottom: 14px; font-size: 12px; color: #d1d5db;">
+          <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+            <input type="checkbox" id="page-clear-history" checked style="accent-color: var(--accent-green); cursor: pointer;">
+            <span>Browsing History</span>
+          </label>
+          <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+            <input type="checkbox" id="page-clear-cookies" checked style="accent-color: var(--accent-green); cursor: pointer;">
+            <span>Cookies &amp; Site Data</span>
+          </label>
+          <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+            <input type="checkbox" id="page-clear-cache" checked style="accent-color: var(--accent-green); cursor: pointer;">
+            <span>Cached Images &amp; Files</span>
+          </label>
+          <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+            <input type="checkbox" id="page-clear-storage" checked style="accent-color: var(--accent-green); cursor: pointer;">
+            <span>Storage &amp; Service Workers</span>
+          </label>
+        </div>
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+          <div id="page-clear-status" style="font-size: 11px; color: var(--accent-green); font-weight: 500;" class="hidden"></div>
+          <button class="btn-primary" id="page-btn-clear-data" style="margin-left: auto; background: rgba(239, 68, 68, 0.2); border-color: rgba(239, 68, 68, 0.4); color: #fca5a5; white-space: nowrap;">
+            Delete Browsing Data
+          </button>
+        </div>
+      </div>
     </div>
 
     <div class="setting-group" style="padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.06);">
@@ -157,13 +190,21 @@
           window.oniAPI.getActiveTheme()
         ]);
 
-        const activeId = (activeTheme && activeTheme.id) || settings.activeThemeId || 'classic';
-        themeNameInput.value = (activeTheme && activeTheme.name) || 'Classic';
+        const activeId = (activeTheme && activeTheme.id) || settings.activeThemeId || 'oni-os';
+        themeNameInput.value = (activeTheme && activeTheme.name) || 'Oni OS';
         engineSelect.value = settings.searchEngine || 'duckduckgo';
         bmBarToggle.checked = settings.showBookmarksBar !== false;
         shieldToggle.checked = settings.adBlockEnabled !== false;
 
-        themeListEl.innerHTML = (themes || []).map(t => {
+        const sortedThemes = [...(themes || [])].sort((a, b) => {
+          if (a.id === 'oni-os') return -1;
+          if (b.id === 'oni-os') return 1;
+          if (a.id === 'classic') return -1;
+          if (b.id === 'classic') return 1;
+          return 0;
+        });
+
+        themeListEl.innerHTML = sortedThemes.map(t => {
           const isActive = t.id === activeId;
           const vars = (t.chrome && t.chrome.cssVariables) || {};
           const bgMain = vars['--bg-main'] || '#0a0b0f';
@@ -207,8 +248,8 @@
       }
 
       btnSaveTheme.addEventListener('click', async () => {
-        const name = (themeNameInput.value || 'Classic').trim() || 'Classic';
-        const id = name.toLowerCase() === 'classic' ? 'classic' : undefined;
+        const name = (themeNameInput.value || (activeTheme && activeTheme.name) || 'Oni OS').trim() || 'Oni OS';
+        const id = name.toLowerCase() === 'oni os' || name.toLowerCase() === 'oni-os' ? 'oni-os' : (name.toLowerCase() === 'classic' ? 'classic' : undefined);
         const res = await window.oniAPI.saveTheme({ id, name });
         await loadPageSettings();
         if (res && res.theme) {
@@ -229,6 +270,47 @@
         window.oniAPI.updateSettings({ adBlockEnabled: e.target.checked });
         window.oniAPI.toggleShield(e.target.checked);
       });
+
+      const clearDataBtn = document.getElementById('page-btn-clear-data');
+      if (clearDataBtn) {
+        clearDataBtn.addEventListener('click', async () => {
+          const history = document.getElementById('page-clear-history')?.checked ?? true;
+          const cookies = document.getElementById('page-clear-cookies')?.checked ?? true;
+          const cache = document.getElementById('page-clear-cache')?.checked ?? true;
+          const storage = document.getElementById('page-clear-storage')?.checked ?? true;
+          const statusEl = document.getElementById('page-clear-status');
+
+          clearDataBtn.disabled = true;
+          clearDataBtn.textContent = 'Deleting...';
+
+          try {
+            if (window.oniAPI && window.oniAPI.clearBrowsingData) {
+              await window.oniAPI.clearBrowsingData({ history, cookies, cache, storage });
+            } else if (window.oniAPI && window.oniAPI.clearHistory && history) {
+              await window.oniAPI.clearHistory();
+            }
+
+            if (statusEl) {
+              statusEl.textContent = 'Browsing data deleted successfully ✓';
+              statusEl.style.color = 'var(--accent-green)';
+              statusEl.classList.remove('hidden');
+              setTimeout(() => {
+                if (statusEl) statusEl.classList.add('hidden');
+              }, 3000);
+            }
+          } catch (err) {
+            console.error('Failed to clear browsing data:', err);
+            if (statusEl) {
+              statusEl.textContent = 'Failed to delete some data';
+              statusEl.style.color = '#ef4444';
+              statusEl.classList.remove('hidden');
+            }
+          } finally {
+            clearDataBtn.disabled = false;
+            clearDataBtn.textContent = 'Delete Browsing Data';
+          }
+        });
+      }
 
       await loadPageSettings();
     })();

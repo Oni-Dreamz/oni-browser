@@ -453,6 +453,8 @@
       await renderOsBookmarksWindow();
     } else if (winId === 'os-win-history') {
       await renderOsHistoryWindow();
+    } else if (winId === 'os-win-downloads') {
+      await renderOsDownloadsWindow();
     } else if (winId === 'os-win-settings') {
       await renderOsSettingsWindow();
     }
@@ -499,6 +501,171 @@
     });
   }
 
+  function formatBytes(bytes) {
+    if (!bytes || bytes <= 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(1024));
+    return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+  }
+
+  async function renderOsDownloadsWindow() {
+    const body = document.getElementById('os-win-downloads-body');
+    if (!body || !window.oniAPI) return;
+    const downloads = await window.oniAPI.getDownloads();
+
+    if (!downloads || downloads.length === 0) {
+      body.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; padding-bottom:8px; border-bottom:1px solid rgba(255,255,255,0.08);">
+          <span style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.8px;">Recent Downloads</span>
+        </div>
+        <div style="color:var(--text-muted); padding:32px 16px; text-align:center; font-size:12px;">
+          No downloads recorded yet.
+        </div>
+      `;
+      return;
+    }
+
+    const activeList = downloads.filter(d => d.state === 'progressing');
+    const recentList = downloads.filter(d => d.state !== 'progressing');
+
+    let html = `
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; padding-bottom:8px; border-bottom:1px solid rgba(255,255,255,0.08);">
+        <span style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.8px;">
+          Downloads (${downloads.length})
+        </span>
+        <button id="os-newtab-dl-clear" class="os-btn-ghost" style="color:#ef4444; border-color:rgba(239,68,68,0.3); font-size:11px; padding:3px 9px;">Clear All</button>
+      </div>
+    `;
+
+    if (activeList.length > 0) {
+      html += `
+        <div style="margin-bottom:14px;">
+          <div style="font-size:11px; font-weight:700; color:var(--accent-green); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:6px; display:flex; align-items:center; gap:6px;">
+            <span style="display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--accent-green); box-shadow:0 0 8px var(--accent-green);"></span>
+            Active Downloads (${activeList.length})
+          </div>
+          <div style="display:flex; flex-direction:column; gap:8px;">
+      `;
+
+      activeList.forEach(item => {
+        const pct = item.totalBytes > 0 ? Math.min(100, Math.round((item.receivedBytes / item.totalBytes) * 100)) : 0;
+        const receivedStr = formatBytes(item.receivedBytes);
+        const totalStr = item.totalBytes > 0 ? formatBytes(item.totalBytes) : 'unknown size';
+
+        html += `
+          <div class="os-dl-active-card">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-bottom:4px;">
+              <div style="font-weight:600; color:#fff; font-size:12.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:380px;">
+                ${item.filename || 'Downloading file...'}
+              </div>
+              <span class="os-dl-badge-pill progressing">${pct}%</span>
+            </div>
+            <div class="os-dl-progress-bar">
+              <div class="os-dl-progress-fill" style="width: ${pct}%;"></div>
+            </div>
+            <div class="os-dl-meta-row">
+              <span>${receivedStr} / ${totalStr}</span>
+              <span style="color:var(--accent-cyan); font-weight:500;">Downloading...</span>
+            </div>
+          </div>
+        `;
+      });
+
+      html += `
+          </div>
+        </div>
+      `;
+    }
+
+    if (recentList.length > 0) {
+      if (activeList.length > 0) {
+        html += `
+          <div style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:6px;">
+            Completed &amp; Past
+          </div>
+        `;
+      }
+
+      html += `<div style="display:flex; flex-direction:column; gap:6px; max-height:280px; overflow-y:auto; padding-right:4px;">`;
+
+      recentList.forEach(item => {
+        const isCompleted = item.state === 'completed';
+        const isCancelled = item.state === 'cancelled' || item.state === 'interrupted';
+        const badgeClass = isCompleted ? 'completed' : (isCancelled ? 'cancelled' : 'progressing');
+        const badgeText = isCompleted ? 'Completed' : (isCancelled ? 'Cancelled' : item.state);
+        const sizeStr = item.totalBytes > 0 ? formatBytes(item.totalBytes) : formatBytes(item.receivedBytes);
+        const dateStr = item.timestamp ? new Date(item.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric' }) : '';
+
+        html += `
+          <div class="os-list-row" style="cursor:default;">
+            <div style="display:flex; align-items:center; gap:10px; overflow:hidden; max-width:340px;">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${isCompleted ? 'var(--accent-green)' : 'var(--text-muted)'}" stroke-width="2" style="flex-shrink:0;">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+                <line x1="12" y1="18" x2="12" y2="12"></line>
+                <polyline points="9 15 12 18 15 15"></polyline>
+              </svg>
+              <div style="overflow:hidden;">
+                <div style="font-weight:600; color:#fff; font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                  ${item.filename || 'Downloaded item'}
+                </div>
+                <div style="font-size:10.5px; color:var(--text-muted); display:flex; align-items:center; gap:6px; margin-top:2px;">
+                  <span>${sizeStr}</span>
+                  ${dateStr ? `<span>• ${dateStr}</span>` : ''}
+                  <span class="os-dl-badge-pill ${badgeClass}">${badgeText}</span>
+                </div>
+              </div>
+            </div>
+            <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
+              ${item.path ? `
+                <button class="os-btn-ghost os-dl-action-open" data-path="${item.path}" style="padding:3px 8px; font-size:11px; color:var(--accent-cyan); border-color:rgba(0,229,255,0.25);">
+                  Open ↗
+                </button>
+                <button class="os-btn-ghost os-dl-action-folder" data-path="${item.path}" title="Show in folder" style="padding:3px 8px; font-size:11px;">
+                  📁
+                </button>
+              ` : ''}
+            </div>
+          </div>
+        `;
+      });
+
+      html += `</div>`;
+    }
+
+    body.innerHTML = html;
+
+    const clearDlBtn = document.getElementById('os-newtab-dl-clear');
+    if (clearDlBtn) {
+      clearDlBtn.addEventListener('click', async () => {
+        if (window.oniAPI && window.oniAPI.clearDownloads) {
+          await window.oniAPI.clearDownloads();
+          renderOsDownloadsWindow();
+        }
+      });
+    }
+
+    body.querySelectorAll('.os-dl-action-open').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const p = btn.dataset.path;
+        if (p && window.oniAPI && window.oniAPI.openDownloadFile) {
+          window.oniAPI.openDownloadFile(p);
+        }
+      });
+    });
+
+    body.querySelectorAll('.os-dl-action-folder').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const p = btn.dataset.path;
+        if (p && window.oniAPI && window.oniAPI.openDownloadFolder) {
+          window.oniAPI.openDownloadFolder(p);
+        }
+      });
+    });
+  }
+
   async function renderOsSettingsWindow() {
     const body = document.getElementById('os-win-settings-body');
     if (!body || !window.oniAPI) return;
@@ -507,11 +674,19 @@
       window.oniAPI.getActiveTheme()
     ]);
 
+    const sortedThemes = [...(themes || [])].sort((a, b) => {
+      if (a.id === 'oni-os') return -1;
+      if (b.id === 'oni-os') return 1;
+      if (a.id === 'classic') return -1;
+      if (b.id === 'classic') return 1;
+      return 0;
+    });
+
     body.innerHTML = `
       <div style="margin-bottom:14px;">
         <div class="os-field-label">Active Operating Theme Construct</div>
         <div style="display:flex; flex-direction:column; gap:8px; margin-top:6px;">
-          ${(themes || []).map(t => `
+          ${sortedThemes.map(t => `
             <div class="os-list-row os-theme-pick" data-theme-id="${t.id}" style="border-color:${t.id === activeTheme.id ? 'var(--accent-green)' : 'rgba(255,255,255,0.08)'};">
               <div>
                 <div style="font-weight:700; color:#fff;">${t.name} ${t.id === activeTheme.id ? '<span style="color:var(--accent-green);font-size:10px;margin-left:6px;">● ACTIVE</span>' : ''}</div>
@@ -522,7 +697,46 @@
           `).join('')}
         </div>
       </div>
-      <div style="display:flex; justify-content:space-between; align-items:center; padding-top:10px; border-top:1px solid rgba(255,255,255,0.08);">
+
+      <div style="margin-top:14px; padding-top:14px; border-top:1px solid rgba(255,255,255,0.08);">
+        <div class="os-field-label">Privacy &amp; Security</div>
+        <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06); border-radius:10px; padding:12px; margin-top:6px;">
+          <div style="font-weight:600; font-size:12.5px; color:#fff; margin-bottom:2px;">Clear Browsing Data</div>
+          <div style="font-size:11px; color:var(--text-muted); margin-bottom:10px;">Delete history, cookies, cache, and more.</div>
+          
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px 12px; margin-bottom:12px; font-size:11.5px; color:#d1d5db;">
+            <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+              <input type="checkbox" id="os-win-clear-history" checked style="accent-color:var(--accent-green); cursor:pointer;">
+              <span>Browsing History</span>
+            </label>
+            <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+              <input type="checkbox" id="os-win-clear-cookies" checked style="accent-color:var(--accent-green); cursor:pointer;">
+              <span>Cookies &amp; Site Data</span>
+            </label>
+            <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+              <input type="checkbox" id="os-win-clear-cache" checked style="accent-color:var(--accent-green); cursor:pointer;">
+              <span>Cached Images &amp; Files</span>
+            </label>
+            <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+              <input type="checkbox" id="os-win-clear-storage" checked style="accent-color:var(--accent-green); cursor:pointer;">
+              <span>Storage &amp; Service Workers</span>
+            </label>
+          </div>
+
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+            <div id="os-win-clear-status" style="font-size:11px; color:var(--accent-green); font-weight:500;" class="hidden"></div>
+            <button class="os-btn-danger" id="os-win-btn-clear-data" style="margin-left:auto; display:flex; align-items:center; gap:6px;">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              </svg>
+              <span>Delete Browsing Data</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex; justify-content:space-between; align-items:center; padding-top:12px; margin-top:12px; border-top:1px solid rgba(255,255,255,0.08);">
         <span style="font-size:11.5px; color:var(--text-muted);">Home Widgets Panel</span>
         <button class="os-btn-ghost" id="os-win-toggle-widgets">Toggle Widgets</button>
       </div>
@@ -538,6 +752,57 @@
         }
       });
     });
+
+    const clearDataBtn = document.getElementById('os-win-btn-clear-data');
+    if (clearDataBtn) {
+      clearDataBtn.addEventListener('click', async () => {
+        const history = document.getElementById('os-win-clear-history')?.checked ?? true;
+        const cookies = document.getElementById('os-win-clear-cookies')?.checked ?? true;
+        const cache = document.getElementById('os-win-clear-cache')?.checked ?? true;
+        const storage = document.getElementById('os-win-clear-storage')?.checked ?? true;
+        const statusEl = document.getElementById('os-win-clear-status');
+
+        clearDataBtn.disabled = true;
+        clearDataBtn.textContent = 'Deleting...';
+
+        try {
+          if (window.oniAPI && window.oniAPI.clearBrowsingData) {
+            await window.oniAPI.clearBrowsingData({ history, cookies, cache, storage });
+          } else if (window.oniAPI && window.oniAPI.clearHistory && history) {
+            await window.oniAPI.clearHistory();
+          }
+
+          if (history && typeof renderOsHistoryWindow === 'function') {
+            await renderOsHistoryWindow();
+          }
+
+          if (statusEl) {
+            statusEl.textContent = 'Browsing data deleted successfully ✓';
+            statusEl.style.color = 'var(--accent-green)';
+            statusEl.classList.remove('hidden');
+            setTimeout(() => {
+              if (statusEl) statusEl.classList.add('hidden');
+            }, 3000);
+          }
+        } catch (err) {
+          console.error('Failed to clear browsing data:', err);
+          if (statusEl) {
+            statusEl.textContent = 'Failed to delete some data';
+            statusEl.style.color = '#ef4444';
+            statusEl.classList.remove('hidden');
+          }
+        } finally {
+          clearDataBtn.disabled = false;
+          clearDataBtn.innerHTML = `
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="3 6 5 6 21 6"></polyline>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            </svg>
+            <span>Delete Browsing Data</span>
+          `;
+        }
+      });
+    }
 
     const toggleWidgetsBtn = document.getElementById('os-win-toggle-widgets');
     if (toggleWidgetsBtn) {
@@ -796,6 +1061,14 @@
     } else if (action === 'history') {
       if (osStartMenu) osStartMenu.classList.add('hidden');
       openOsWindow('os-win-history');
+    } else if (action === 'downloads') {
+      if (osStartMenu) osStartMenu.classList.add('hidden');
+      const win = document.getElementById('os-win-downloads');
+      if (win && !win.classList.contains('hidden')) {
+        closeOsWindow('os-win-downloads');
+      } else {
+        openOsWindow('os-win-downloads');
+      }
     } else if (action === 'settings') {
       if (osStartMenu) osStartMenu.classList.add('hidden');
       openOsWindow('os-win-settings');
@@ -869,6 +1142,22 @@
         }
         if (window.oniAPI.onOsAction && PAGE_MODE === 'desktop') {
           window.oniAPI.onOsAction(handleOsAction);
+        }
+        if (window.oniAPI.onDownloadProgress) {
+          window.oniAPI.onDownloadProgress(() => {
+            const win = document.getElementById('os-win-downloads');
+            if (win && !win.classList.contains('hidden')) {
+              renderOsDownloadsWindow();
+            }
+          });
+        }
+        if (window.oniAPI.onDownloadCompleted) {
+          window.oniAPI.onDownloadCompleted(() => {
+            const win = document.getElementById('os-win-downloads');
+            if (win && !win.classList.contains('hidden')) {
+              renderOsDownloadsWindow();
+            }
+          });
         }
       } catch (e) {
         // Fallback

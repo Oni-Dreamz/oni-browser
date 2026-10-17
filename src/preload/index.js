@@ -33,10 +33,11 @@ if (window.location.protocol === 'file:') {
     removeBookmark: (idOrUrl) => ipcRenderer.invoke('bookmarks:remove', idOrUrl),
     isBookmarked: (url) => ipcRenderer.invoke('bookmarks:isBookmarked', url),
 
-    // History
+    // History & Privacy
     getHistory: () => ipcRenderer.invoke('history:get'),
     removeHistory: (id) => ipcRenderer.invoke('history:remove', id),
     clearHistory: () => ipcRenderer.invoke('history:clear'),
+    clearBrowsingData: (options) => ipcRenderer.invoke('privacy:clearData', options),
 
     // Downloads
     getDownloads: () => ipcRenderer.invoke('downloads:get'),
@@ -92,6 +93,18 @@ if (window.location.protocol === 'file:') {
       ipcRenderer.on('download:progress', handler);
       return () => ipcRenderer.removeListener('download:progress', handler);
     },
+    onDownloadCompleted: (callback) => {
+      const handler = (event, data) => callback(data);
+      ipcRenderer.on('download:completed', handler);
+      return () => ipcRenderer.removeListener('download:completed', handler);
+    },
+    onShowContextMenu: (callback) => {
+      const handler = (event, data) => callback(data);
+      ipcRenderer.on('os:show-context-menu', handler);
+      return () => ipcRenderer.removeListener('os:show-context-menu', handler);
+    },
+    executeContextMenuAction: (action, params) => ipcRenderer.invoke('context:action', { action, params }),
+    hideContextMenu: () => ipcRenderer.invoke('context:hide'),
     onShieldUpdated: (callback) => {
       const handler = (event, data) => callback(data);
       ipcRenderer.on('shield:updated', handler);
@@ -126,6 +139,13 @@ if (window.location.protocol === 'file:') {
       const handler = (event, text) => callback(text);
       ipcRenderer.on('tooltip:update', handler);
       return () => ipcRenderer.removeListener('tooltip:update', handler);
+    },
+    showDownloadToast: (data) => ipcRenderer.invoke('toast:show', data),
+    hideDownloadToast: () => ipcRenderer.invoke('toast:hide'),
+    onToastDisplay: (callback) => {
+      const handler = (event, data) => callback(data);
+      ipcRenderer.on('toast:display', handler);
+      return () => ipcRenderer.removeListener('toast:display', handler);
     }
   });
 }

@@ -35,6 +35,8 @@
   const osMenuSpotlight = document.getElementById('os-menu-spotlight');
   const osMenuBookmarks = document.getElementById('os-menu-bookmarks');
   const osMenuHistory = document.getElementById('os-menu-history');
+  const osMenuDownloads = document.getElementById('os-menu-downloads');
+  const osDlBadge = document.getElementById('os-dl-badge');
   const osMenuSettings = document.getElementById('os-menu-settings');
 
   const bookmarksBar = document.getElementById('bookmarks-bar');
@@ -188,6 +190,14 @@
     if (osMenuHistory) {
       osMenuHistory.addEventListener('click', () => {
         if (window.oniAPI.triggerOsAction) window.oniAPI.triggerOsAction('history');
+      });
+    }
+    if (osMenuDownloads) {
+      osMenuDownloads.addEventListener('click', () => {
+        if (window.oniAPI && window.oniAPI.hideDownloadToast) {
+          window.oniAPI.hideDownloadToast();
+        }
+        if (window.oniAPI.triggerOsAction) window.oniAPI.triggerOsAction('downloads');
       });
     }
     if (osMenuSettings) {
@@ -553,9 +563,58 @@
     }
   }
 
-  // Downloads UI
+  // Downloads UI & Toast Notifications
+  const notifiedDownloads = new Set();
+
+  function showDownloadToastNotification(item) {
+    if (!item) return;
+
+    let targetX = 180;
+    let targetY = 40;
+
+    const osDlBtn = document.getElementById('os-menu-downloads');
+    const classicDlBtn = document.getElementById('btn-downloads');
+    
+    // Choose active button depending on theme
+    const activeBtn = (osDlBtn && osDlBtn.offsetParent !== null) ? osDlBtn : (classicDlBtn && classicDlBtn.offsetParent !== null ? classicDlBtn : osDlBtn);
+
+    if (activeBtn) {
+      const rect = activeBtn.getBoundingClientRect();
+      // Center the 360px toast card directly below the Downloads button/text
+      targetX = Math.round(rect.left + (rect.width / 2) - 180);
+      targetY = Math.round(rect.bottom + 4);
+    }
+
+    if (window.oniAPI && window.oniAPI.showDownloadToast) {
+      window.oniAPI.showDownloadToast({
+        x: targetX,
+        y: targetY,
+        title: 'Download Complete',
+        filename: item.filename,
+        filePath: item.path
+      });
+    }
+  }
+
   function handleDownloadProgress(item) {
-    downloadsBadge.classList.remove('hidden');
+    if (!item) return;
+    if (downloadsBadge) downloadsBadge.classList.remove('hidden');
+
+    const pct = item.totalBytes > 0 ? Math.round((item.receivedBytes / item.totalBytes) * 100) : 0;
+    if (osDlBadge) {
+      if (item.state === 'progressing') {
+        osDlBadge.textContent = `${pct}%`;
+        osDlBadge.classList.remove('hidden');
+      } else {
+        osDlBadge.classList.add('hidden');
+      }
+    }
+
+    if (item.state === 'completed' && !notifiedDownloads.has(item.id)) {
+      notifiedDownloads.add(item.id);
+      showDownloadToastNotification(item);
+    }
+
     renderDownloadsFlyout();
   }
 
@@ -631,6 +690,12 @@
     btnSettings.addEventListener('click', () => openOverlay('settings'));
 
     // Close flyouts on outside click
+    document.addEventListener('pointerdown', (e) => {
+      if (window.oniAPI && window.oniAPI.hideContextMenu) {
+        window.oniAPI.hideContextMenu();
+      }
+    });
+
     document.addEventListener('click', (e) => {
       if (!shieldFlyout.contains(e.target) && e.target !== btnShield) {
         shieldFlyout.classList.add('hidden');
@@ -733,9 +798,17 @@
       window.oniAPI.getActiveTheme()
     ]);
 
-    const activeId = (activeTheme && activeTheme.id) || settings.activeThemeId || 'classic';
+    const activeId = (activeTheme && activeTheme.id) || settings.activeThemeId || 'oni-os';
 
-    const themeCardsHtml = (themes || []).map(t => {
+    const sortedThemes = [...(themes || [])].sort((a, b) => {
+      if (a.id === 'oni-os') return -1;
+      if (b.id === 'oni-os') return 1;
+      if (a.id === 'classic') return -1;
+      if (b.id === 'classic') return 1;
+      return 0;
+    });
+
+    const themeCardsHtml = sortedThemes.map(t => {
       const isActive = t.id === activeId;
       const vars = (t.chrome && t.chrome.cssVariables) || {};
       const bgMain = vars['--bg-main'] || '#0a0b0f';
@@ -784,7 +857,7 @@
         </div>
 
         <div class="theme-save-row">
-          <input type="text" id="modal-theme-name" class="setting-input" value="${(activeTheme && activeTheme.name) || 'Classic'}" placeholder="Theme name (e.g. Classic)" style="flex: 1;">
+          <input type="text" id="modal-theme-name" class="setting-input" value="${(activeTheme && activeTheme.name) || 'Oni OS'}" placeholder="Theme name (e.g. Oni OS)" style="flex: 1;">
           <button id="modal-btn-save-theme" class="btn-primary" style="white-space: nowrap;">Save Current Config</button>
         </div>
         <div id="modal-theme-status" class="theme-status-msg hidden"></div>
@@ -819,6 +892,39 @@
         </label>
       </div>
 
+      <div class="setting-group" style="padding-top: 14px; border-top: 1px solid var(--border-subtle);">
+        <div class="setting-label">Privacy &amp; Security</div>
+        <div class="setting-desc">Clear local cookies, cached network assets, storage, and browsing logs.</div>
+        <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 8px; padding: 12px; margin-top: 8px;">
+          <div style="font-weight: 600; font-size: 13px; color: #fff; margin-bottom: 2px;">Clear Browsing Data</div>
+          <div style="font-size: 11.5px; color: var(--text-muted); margin-bottom: 10px;">Delete history, cookies, cache, and more.</div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; margin-bottom: 12px; font-size: 12px; color: #d1d5db;">
+            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+              <input type="checkbox" id="modal-clear-history" checked style="accent-color: var(--accent-green); cursor: pointer;">
+              <span>Browsing History</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+              <input type="checkbox" id="modal-clear-cookies" checked style="accent-color: var(--accent-green); cursor: pointer;">
+              <span>Cookies &amp; Site Data</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+              <input type="checkbox" id="modal-clear-cache" checked style="accent-color: var(--accent-green); cursor: pointer;">
+              <span>Cached Images &amp; Files</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+              <input type="checkbox" id="modal-clear-storage" checked style="accent-color: var(--accent-green); cursor: pointer;">
+              <span>Storage &amp; Service Workers</span>
+            </label>
+          </div>
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+            <div id="modal-clear-status" style="font-size: 11px; color: var(--accent-green); font-weight: 500;" class="hidden"></div>
+            <button class="btn-primary" id="modal-btn-clear-data" style="margin-left: auto; background: rgba(239, 68, 68, 0.2); border-color: rgba(239, 68, 68, 0.4); color: #fca5a5; white-space: nowrap;">
+              Delete Browsing Data
+            </button>
+          </div>
+        </div>
+      </div>
+
       <div class="setting-group" style="padding-top: 10px; border-top: 1px solid var(--border-subtle);">
         <div class="setting-label">About Oni Browser</div>
         <div class="setting-desc">Version 1.0.0 (Windows Standalone x64 Edition). Crafted for speed, aesthetics, and privacy.</div>
@@ -844,8 +950,8 @@
     // Save current configuration into theme
     document.getElementById('modal-btn-save-theme').addEventListener('click', async () => {
       const nameInput = document.getElementById('modal-theme-name');
-      const name = (nameInput.value || 'Classic').trim() || 'Classic';
-      const id = name.toLowerCase() === 'classic' ? 'classic' : undefined;
+      const name = (nameInput.value || (activeTheme && activeTheme.name) || 'Oni OS').trim() || 'Oni OS';
+      const id = name.toLowerCase() === 'oni os' || name.toLowerCase() === 'oni-os' ? 'oni-os' : (name.toLowerCase() === 'classic' ? 'classic' : undefined);
       const res = await window.oniAPI.saveTheme({ id, name });
       if (res && res.theme) {
         currentTheme = res.theme;
@@ -874,6 +980,47 @@
       currentSettings = await window.oniAPI.updateSettings({ adBlockEnabled: e.target.checked });
       window.oniAPI.toggleShield(e.target.checked);
     });
+
+    const clearDataBtn = document.getElementById('modal-btn-clear-data');
+    if (clearDataBtn) {
+      clearDataBtn.addEventListener('click', async () => {
+        const history = document.getElementById('modal-clear-history')?.checked ?? true;
+        const cookies = document.getElementById('modal-clear-cookies')?.checked ?? true;
+        const cache = document.getElementById('modal-clear-cache')?.checked ?? true;
+        const storage = document.getElementById('modal-clear-storage')?.checked ?? true;
+        const statusEl = document.getElementById('modal-clear-status');
+
+        clearDataBtn.disabled = true;
+        clearDataBtn.textContent = 'Deleting...';
+
+        try {
+          if (window.oniAPI && window.oniAPI.clearBrowsingData) {
+            await window.oniAPI.clearBrowsingData({ history, cookies, cache, storage });
+          } else if (window.oniAPI && window.oniAPI.clearHistory && history) {
+            await window.oniAPI.clearHistory();
+          }
+
+          if (statusEl) {
+            statusEl.textContent = 'Browsing data deleted successfully ✓';
+            statusEl.style.color = 'var(--accent-green)';
+            statusEl.classList.remove('hidden');
+            setTimeout(() => {
+              if (statusEl) statusEl.classList.add('hidden');
+            }, 3000);
+          }
+        } catch (err) {
+          console.error('Failed to clear browsing data:', err);
+          if (statusEl) {
+            statusEl.textContent = 'Failed to delete some data';
+            statusEl.style.color = '#ef4444';
+            statusEl.classList.remove('hidden');
+          }
+        } finally {
+          clearDataBtn.disabled = false;
+          clearDataBtn.textContent = 'Delete Browsing Data';
+        }
+      });
+    }
   }
 
   // History Modal View
@@ -1064,8 +1211,12 @@
         }
       } else if (isCtrlOrCmd && e.key.toLowerCase() === 'j') {
         e.preventDefault();
-        downloadsFlyout.classList.toggle('hidden');
-        if (!downloadsFlyout.classList.contains('hidden')) renderDownloadsFlyout();
+        if (currentTheme && (currentTheme.id === 'oni-os' || currentTheme.chrome?.layout?.showOsMenubar)) {
+          if (window.oniAPI && window.oniAPI.triggerOsAction) window.oniAPI.triggerOsAction('downloads');
+        } else {
+          downloadsFlyout.classList.toggle('hidden');
+          if (!downloadsFlyout.classList.contains('hidden')) renderDownloadsFlyout();
+        }
       } else if (isCtrlOrCmd && (e.key === '=' || e.key === '+')) {
         e.preventDefault();
         if (activeTabId) window.oniAPI.zoom(0.1, activeTabId);

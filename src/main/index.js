@@ -1,4 +1,4 @@
-const { app, BrowserWindow, WebContentsView, ipcMain, shell, Menu, MenuItem } = require('electron');
+const { app, BrowserWindow, WebContentsView, ipcMain, shell, Menu, MenuItem, session, clipboard } = require('electron');
 const path = require('path');
 const store = require('./store');
 const oniShield = require('./adblock');
@@ -6,6 +6,8 @@ const oniShield = require('./adblock');
 let mainWindow = null;
 let dockView = null;
 let tooltipView = null;
+let toastView = null;
+let contextMenuView = null;
 let dockBounds = { width: 340, height: 100, x: 0, y: 0 };
 const tabs = new Map(); // tabId -> Tab object
 let activeTabId = null;
@@ -144,6 +146,28 @@ function updateActiveViewBounds() {
   updateDockViewBounds();
 }
 
+function canGoBack(wc) {
+  if (!wc || wc.isDestroyed()) return false;
+  return wc.navigationHistory ? wc.navigationHistory.canGoBack() : wc.canGoBack();
+}
+
+function canGoForward(wc) {
+  if (!wc || wc.isDestroyed()) return false;
+  return wc.navigationHistory ? wc.navigationHistory.canGoForward() : wc.canGoForward();
+}
+
+function goBack(wc) {
+  if (!wc || wc.isDestroyed()) return;
+  if (wc.navigationHistory) wc.navigationHistory.goBack();
+  else wc.goBack();
+}
+
+function goForward(wc) {
+  if (!wc || wc.isDestroyed()) return;
+  if (wc.navigationHistory) wc.navigationHistory.goForward();
+  else wc.goForward();
+}
+
 function createTab(initialUrl = 'oni://newtab', options = {}) {
   if (initialUrl === 'oni://newtab?mode=classic') {
     initialUrl = 'oni://newtab';
@@ -177,26 +201,9 @@ function createTab(initialUrl = 'oni://newtab', options = {}) {
 
   const wc = view.webContents;
 
-function canGoBack(wc) {
-  return wc.navigationHistory ? wc.navigationHistory.canGoBack() : wc.canGoBack();
-}
-
-function canGoForward(wc) {
-  return wc.navigationHistory ? wc.navigationHistory.canGoForward() : wc.canGoForward();
-}
-
-function goBack(wc) {
-  if (wc.navigationHistory) wc.navigationHistory.goBack();
-  else wc.goBack();
-}
-
-function goForward(wc) {
-  if (wc.navigationHistory) wc.navigationHistory.goForward();
-  else wc.goForward();
-}
-
   // WebContents event bindings
   wc.on('did-start-loading', () => {
+    hideContextMenuView();
     tab.isLoading = true;
     notifyTabUpdated(tab);
   });
@@ -248,6 +255,12 @@ function goForward(wc) {
 
   // Context Menu
   wc.on('context-menu', (event, params) => {
+    const isHome = wc.getURL().startsWith('oni://home');
+    if (!isHome && contextMenuView && contextMenuView.webContents && !contextMenuView.webContents.isDestroyed()) {
+      showContextMenuView(wc, params);
+      return;
+    }
+
     const menu = new Menu();
 
     if (params.linkURL) {
@@ -361,6 +374,7 @@ function getOrCreateOniOsHomeTab(switchToIt = false) {
 
 function switchTab(tabId) {
   if (!tabs.has(tabId)) return;
+  hideContextMenuView();
 
   // Hide all views except the active one
   for (const [id, tab] of tabs.entries()) {
@@ -384,6 +398,7 @@ function switchTab(tabId) {
 
 function closeTab(tabId) {
   if (!tabs.has(tabId)) return;
+  hideContextMenuView();
 
   const tab = tabs.get(tabId);
 
@@ -443,7 +458,7 @@ function notifyTabUpdated(tab) {
 }
 
 function setupDownloads() {
-  const sess = require('electron').session.defaultSession;
+  const sess = session.defaultSession;
   sess.on('will-download', (event, item) => {
     const downloadId = 'dl_' + Date.now();
     const downloadItem = {
@@ -456,18 +471,13 @@ function setupDownloads() {
       timestamp: Date.now()
     };
     store.addOrUpdateDownload(downloadItem);
-
-    if (mainWindow) {
-      mainWindow.webContents.send('download:progress', downloadItem);
-    }
+    sendToChromeAndDock('download:progress', downloadItem);
 
     item.on('updated', (e, state) => {
       downloadItem.state = state;
       downloadItem.receivedBytes = item.getReceivedBytes();
       store.addOrUpdateDownload(downloadItem);
-      if (mainWindow) {
-        mainWindow.webContents.send('download:progress', downloadItem);
-      }
+      sendToChromeAndDock('download:progress', downloadItem);
     });
 
     item.once('done', (e, state) => {
@@ -475,8 +485,20 @@ function setupDownloads() {
       downloadItem.path = item.getSavePath();
       downloadItem.receivedBytes = item.getReceivedBytes();
       store.addOrUpdateDownload(downloadItem);
-      if (mainWindow) {
-        mainWindow.webContents.send('download:progress', downloadItem);
+      sendToChromeAndDock('download:progress', downloadItem);
+
+      if (state === 'completed') {
+        sendToChromeAndDock('download:completed', downloadItem);
+        try {
+          const { Notification } = require('electron');
+          if (Notification && Notification.isSupported()) {
+            new Notification({
+              title: 'Oni OS • Download Complete',
+              body: downloadItem.filename,
+              icon: path.join(__dirname, '../../assets/app-icon.png')
+            }).show();
+          }
+        } catch (err) {}
       }
     });
   });
@@ -489,6 +511,109 @@ function bringDockAndTooltipToFront() {
   }
   if (tooltipView) {
     mainWindow.contentView.addChildView(tooltipView);
+  }
+  if (toastView) {
+    mainWindow.contentView.addChildView(toastView);
+  }
+  if (contextMenuView) {
+    mainWindow.contentView.addChildView(contextMenuView);
+  }
+}
+
+function createToastView() {
+  toastView = new WebContentsView({
+    webPreferences: {
+      preload: path.join(__dirname, '../preload/index.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true
+    }
+  });
+  try {
+    toastView.setBackgroundColor('#00000000');
+  } catch (e) {
+    // ignore
+  }
+  mainWindow.contentView.addChildView(toastView);
+  toastView.webContents.loadFile(path.join(__dirname, '../renderer/toast.html'));
+  toastView.setVisible(false);
+  toastView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+}
+
+function showToastView(data) {
+  if (!mainWindow || mainWindow.isDestroyed() || !toastView || !data) return;
+  const [winWidth, winHeight] = mainWindow.getContentSize();
+  const w = 360;
+  const h = 64;
+  const x = Math.max(10, Math.min(winWidth - w - 10, typeof data.x === 'number' ? data.x : 200));
+  const y = Math.max(topBarHeight + 2, typeof data.y === 'number' ? data.y : (topBarHeight + 4));
+
+  mainWindow.contentView.addChildView(toastView);
+  if (contextMenuView) {
+    mainWindow.contentView.addChildView(contextMenuView);
+  }
+  toastView.setBounds({ x, y, width: w, height: h });
+  toastView.setVisible(true);
+  toastView.webContents.send('toast:display', data);
+}
+
+function hideToastView() {
+  if (toastView && !toastView.webContents.isDestroyed()) {
+    toastView.setVisible(false);
+    toastView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+  }
+}
+
+function createContextMenuView() {
+  contextMenuView = new WebContentsView({
+    webPreferences: {
+      preload: path.join(__dirname, '../preload/index.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true
+    }
+  });
+  try {
+    contextMenuView.setBackgroundColor('#00000000');
+  } catch (e) {
+    // ignore
+  }
+  mainWindow.contentView.addChildView(contextMenuView);
+  contextMenuView.webContents.loadFile(path.join(__dirname, '../renderer/contextmenu.html'));
+  contextMenuView.setVisible(false);
+  contextMenuView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+}
+
+function showContextMenuView(wc, params) {
+  if (!mainWindow || mainWindow.isDestroyed() || !contextMenuView) return;
+  const [winWidth, winHeight] = mainWindow.getContentSize();
+  const y = topBarHeight;
+  const h = Math.max(0, winHeight - y);
+
+  // Bring contextMenuView to the very front of the child view stack
+  mainWindow.contentView.addChildView(contextMenuView);
+  contextMenuView.setBounds({ x: 0, y, width: winWidth, height: h });
+  contextMenuView.setVisible(true);
+
+  contextMenuView.webContents.send('os:show-context-menu', {
+    x: params.x,
+    y: params.y,
+    linkURL: params.linkURL || '',
+    srcURL: params.srcURL || '',
+    mediaType: params.mediaType || '',
+    selectionText: (params.selectionText || '').trim(),
+    isEditable: !!params.isEditable,
+    editFlags: params.editFlags || {},
+    pageURL: params.pageURL || wc.getURL(),
+    canGoBack: canGoBack(wc),
+    canGoForward: canGoForward(wc)
+  });
+}
+
+function hideContextMenuView() {
+  if (contextMenuView && !contextMenuView.webContents.isDestroyed()) {
+    contextMenuView.setVisible(false);
+    contextMenuView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
   }
 }
 
@@ -550,15 +675,18 @@ function createWindow() {
     }
   });
 
-  // Create always-on-top Oni OS Dock view and separate Tooltip view
+  // Create always-on-top Oni OS Dock view, separate Tooltip view, dedicated Toast view, and Context Menu view
   createDockView();
   createTooltipView();
+  createToastView();
+  createContextMenuView();
 
   // Load the browser chrome UI
   mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
 
   // Window resize handler
   mainWindow.on('resize', () => {
+    hideContextMenuView();
     updateActiveViewBounds();
   });
 
@@ -790,7 +918,65 @@ ipcMain.handle('bookmarks:isBookmarked', (event, url) => store.isBookmarked(url)
 // History IPC
 ipcMain.handle('history:get', () => store.getHistory());
 ipcMain.handle('history:remove', (event, id) => store.removeHistory(id));
-ipcMain.handle('history:clear', () => store.clearHistory());
+ipcMain.handle('history:clear', () => {
+  const res = store.clearHistory();
+  sendToChromeAndDock('history:updated', []);
+  return res;
+});
+
+// Privacy & Browsing Data IPC
+ipcMain.handle('privacy:clearData', async (event, options = {}) => {
+  const {
+    history = true,
+    cookies = true,
+    cache = true,
+    storage = true,
+    downloads = false
+  } = options;
+
+  const ses = session.defaultSession;
+
+  if (cache) {
+    try {
+      await ses.clearCache();
+      await ses.clearHostResolverCache();
+      await ses.clearAuthCache();
+    } catch (e) {
+      console.error('Failed clearing network cache:', e);
+    }
+  }
+
+  const storagesToClear = [];
+  if (cookies) storagesToClear.push('cookies');
+  if (storage) {
+    storagesToClear.push('localstorage', 'indexdb', 'websql', 'serviceworkers', 'cachestorage');
+  }
+  if (cache) {
+    storagesToClear.push('shadercache');
+  }
+
+  if (storagesToClear.length > 0) {
+    try {
+      await ses.clearStorageData({
+        storages: storagesToClear
+      });
+    } catch (e) {
+      console.error('Failed clearing storage data:', e);
+    }
+  }
+
+  if (history) {
+    store.clearHistory();
+    sendToChromeAndDock('history:updated', []);
+  }
+
+  if (downloads) {
+    store.clearDownloads();
+    sendToChromeAndDock('downloads:updated', []);
+  }
+
+  return { success: true };
+});
 
 // Downloads IPC
 ipcMain.handle('downloads:get', () => store.getDownloads());
@@ -924,7 +1110,19 @@ ipcMain.handle('tooltip:hide', () => {
   hideTooltipView();
 });
 
+ipcMain.handle('toast:show', (event, data) => {
+  showToastView(data);
+});
+
+ipcMain.handle('toast:hide', () => {
+  hideToastView();
+});
+
 ipcMain.handle('os:triggerAction', (event, action) => {
+  hideContextMenuView();
+  if (action === 'downloads') {
+    hideToastView();
+  }
   if (action === 'home') {
     getOrCreateOniOsHomeTab(true);
     if (dockView && dockView.webContents && !dockView.webContents.isDestroyed()) {
@@ -936,6 +1134,95 @@ ipcMain.handle('os:triggerAction', (event, action) => {
   if (dockView && dockView.webContents && !dockView.webContents.isDestroyed()) {
     dockView.webContents.send('os:action', action);
   }
+});
+
+ipcMain.handle('context:action', async (event, { action, params = {} }) => {
+  const activeTab = tabs.get(activeTabId);
+  const wc = activeTab ? activeTab.view.webContents : null;
+  if (!wc || wc.isDestroyed()) return;
+
+  switch (action) {
+    case 'open-link-new-tab':
+      if (params.linkURL) createTab(params.linkURL);
+      break;
+    case 'open-link-new-window':
+      if (params.linkURL) createTab(params.linkURL);
+      break;
+    case 'copy-link-address':
+      if (params.linkURL) clipboard.writeText(params.linkURL);
+      break;
+    case 'save-link-as':
+      if (params.linkURL) wc.downloadURL(params.linkURL);
+      break;
+    case 'open-image-new-tab':
+      if (params.srcURL) createTab(params.srcURL);
+      break;
+    case 'save-image-as':
+      if (params.srcURL) wc.downloadURL(params.srcURL);
+      break;
+    case 'copy-image':
+      if (typeof wc.copyImageAt === 'function') {
+        wc.copyImageAt(params.x, params.y);
+      }
+      break;
+    case 'copy-image-address':
+      if (params.srcURL) clipboard.writeText(params.srcURL);
+      break;
+    case 'search-image-web':
+      if (params.srcURL) {
+        createTab(`https://www.google.com/searchbyimage?image_url=${encodeURIComponent(params.srcURL)}`);
+      }
+      break;
+    case 'copy':
+      wc.copy();
+      break;
+    case 'cut':
+      wc.cut();
+      break;
+    case 'paste':
+      wc.paste();
+      break;
+    case 'select-all':
+      wc.selectAll();
+      break;
+    case 'undo':
+      wc.undo();
+      break;
+    case 'redo':
+      wc.redo();
+      break;
+    case 'search-selection':
+      if (params.selectionText) {
+        createTab(formatNavigationUrl(params.selectionText));
+      }
+      break;
+    case 'back':
+      if (canGoBack(wc)) goBack(wc);
+      break;
+    case 'forward':
+      if (canGoForward(wc)) goForward(wc);
+      break;
+    case 'reload':
+      wc.reload();
+      break;
+    case 'save-page-as':
+      wc.downloadURL(params.pageURL || wc.getURL());
+      break;
+    case 'print':
+      wc.print();
+      break;
+    case 'view-source':
+      createTab('view-source:' + (params.pageURL || wc.getURL()));
+      break;
+    case 'inspect-element':
+      wc.inspectElement(params.x, params.y);
+      break;
+  }
+  hideContextMenuView();
+});
+
+ipcMain.handle('context:hide', () => {
+  hideContextMenuView();
 });
 
 

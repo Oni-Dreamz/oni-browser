@@ -358,15 +358,15 @@ class Store {
     return {
       settings: {
         searchEngine: 'google', // 'google' | 'duckduckgo' | 'bing' | 'brave'
-        homeUrl: 'oni://newtab',
-        showBookmarksBar: true,
-        theme: 'classic',
-        activeThemeId: 'classic',
+        homeUrl: 'oni://home',
+        showBookmarksBar: false,
+        theme: 'oni-os',
+        activeThemeId: 'oni-os',
         adBlockEnabled: true,
         hardwareAcceleration: true,
         restoreLastSession: false
       },
-      themes: [cloneDeep(CLASSIC_THEME), cloneDeep(ONI_OS_THEME)],
+      themes: [cloneDeep(ONI_OS_THEME), cloneDeep(CLASSIC_THEME)],
       bookmarks: this.getDefaultPinnedApps(),
       history: [],
       downloads: []
@@ -381,21 +381,14 @@ class Store {
         const parsed = JSON.parse(raw);
         const mergedSettings = { ...defaults.settings, ...(parsed.settings || {}), searchEngine: 'google' };
 
-        // Ensure themes array exists and includes both Classic and Oni OS themes
+        // Ensure themes array exists and includes both Oni OS and Classic themes
         let themes = Array.isArray(parsed.themes) && parsed.themes.length > 0
           ? parsed.themes
-          : [cloneDeep(CLASSIC_THEME), cloneDeep(ONI_OS_THEME)];
-
-        const classicIdx = themes.findIndex(t => t.id === 'classic');
-        if (classicIdx === -1) {
-          themes.unshift(cloneDeep(CLASSIC_THEME));
-        } else {
-          themes[classicIdx].behavior = { ...(themes[classicIdx].behavior || {}), searchEngine: 'google' };
-        }
+          : [cloneDeep(ONI_OS_THEME), cloneDeep(CLASSIC_THEME)];
 
         const oniOsIdx = themes.findIndex(t => t.id === 'oni-os');
         if (oniOsIdx === -1) {
-          themes.push(cloneDeep(ONI_OS_THEME));
+          themes.unshift(cloneDeep(ONI_OS_THEME));
         } else {
           // Ensure built-in Oni OS has latest constructs and Google default engine
           themes[oniOsIdx] = {
@@ -406,6 +399,19 @@ class Store {
             behavior: { ...ONI_OS_THEME.behavior, ...(themes[oniOsIdx].behavior || {}), searchEngine: 'google' }
           };
         }
+
+        const classicIdx = themes.findIndex(t => t.id === 'classic');
+        if (classicIdx === -1) {
+          themes.push(cloneDeep(CLASSIC_THEME));
+        } else {
+          themes[classicIdx].behavior = { ...(themes[classicIdx].behavior || {}), searchEngine: 'google' };
+        }
+
+        // Ensure Oni OS is strictly top/first in themes array
+        const oniOsTheme = themes.find(t => t.id === 'oni-os') || cloneDeep(ONI_OS_THEME);
+        const classicTheme = themes.find(t => t.id === 'classic') || cloneDeep(CLASSIC_THEME);
+        const otherThemes = themes.filter(t => t.id !== 'oni-os' && t.id !== 'classic');
+        themes = [oniOsTheme, classicTheme, ...otherThemes];
 
         // Unify Pinned Apps (bookmarks + theme shortcuts)
         let unifiedPins = [];
@@ -452,14 +458,14 @@ class Store {
           }
         });
 
-        // Migrate legacy 'oni-cyber' theme setting to 'classic'
+        // Migrate legacy 'oni-cyber' theme setting to 'oni-os'
         if (!mergedSettings.activeThemeId || mergedSettings.theme === 'oni-cyber') {
-          mergedSettings.activeThemeId = 'classic';
-          mergedSettings.theme = 'classic';
+          mergedSettings.activeThemeId = 'oni-os';
+          mergedSettings.theme = 'oni-os';
         }
         if (!themes.some(t => t.id === mergedSettings.activeThemeId)) {
-          mergedSettings.activeThemeId = 'classic';
-          mergedSettings.theme = 'classic';
+          mergedSettings.activeThemeId = 'oni-os';
+          mergedSettings.theme = 'oni-os';
         }
 
         const data = {
@@ -530,15 +536,21 @@ class Store {
   // Themes
   getThemes() {
     if (!Array.isArray(this.data.themes) || this.data.themes.length === 0) {
-      this.data.themes = [cloneDeep(CLASSIC_THEME)];
+      this.data.themes = [cloneDeep(ONI_OS_THEME), cloneDeep(CLASSIC_THEME)];
+    }
+    const oniOsTheme = this.data.themes.find(t => t.id === 'oni-os');
+    if (oniOsTheme && this.data.themes[0].id !== 'oni-os') {
+      const rest = this.data.themes.filter(t => t.id !== 'oni-os');
+      this.data.themes = [oniOsTheme, ...rest];
+      this.saveData();
     }
     return this.data.themes;
   }
 
   getActiveTheme() {
     const themes = this.getThemes();
-    const activeId = this.data.settings.activeThemeId || this.data.settings.theme || 'classic';
-    return themes.find(t => t.id === activeId) || themes.find(t => t.id === 'classic') || themes[0];
+    const activeId = this.data.settings.activeThemeId || this.data.settings.theme || 'oni-os';
+    return themes.find(t => t.id === activeId) || themes.find(t => t.id === 'oni-os') || themes[0];
   }
 
   applyTheme(themeId) {

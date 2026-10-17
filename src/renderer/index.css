@@ -1111,3 +1111,15 @@ body.theme-oni-os #find-bar {
 }
 
 
+
+.os-dl-badge {
+  background: var(--accent-green);
+  color: #04140b;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 999px;
+  margin-left: 4px;
+}
+
+
