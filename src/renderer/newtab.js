@@ -101,6 +101,8 @@
     closeOsWindow('os-win-spotlight');
     if (document.body.dataset.layout === 'desktop' && window.oniAPI && window.oniAPI.createTab) {
       window.oniAPI.createTab(targetUrl);
+    } else if (window.oniAPI && window.oniAPI.navigate) {
+      window.oniAPI.navigate(targetUrl);
     } else {
       window.location.href = targetUrl;
     }
@@ -347,6 +349,15 @@
       title.className = 'shortcut-title';
       title.textContent = s.title;
       card.appendChild(title);
+
+      card.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (window.oniAPI && window.oniAPI.navigate) {
+          window.oniAPI.navigate(s.url);
+        } else {
+          window.location.href = s.url;
+        }
+      });
 
       shortcutsGrid.appendChild(card);
     });
@@ -1361,15 +1372,12 @@
 
     document.getElementById('ctx-app-edit')?.addEventListener('click', (e) => {
       e.stopPropagation();
+      const app = activeContextApp;
       hideAllContextMenus();
-      if (!activeContextApp) return;
-      const titleEl = document.getElementById('os-app-title');
-      const urlEl = document.getElementById('os-app-url');
-      const iconEl = document.getElementById('os-app-icon');
-      if (titleEl) titleEl.value = activeContextApp.title || '';
-      if (urlEl) urlEl.value = activeContextApp.url || '';
-      if (iconEl) iconEl.value = activeContextApp.icon || activeContextApp.favicon || '';
-      openOsWindow('os-win-add-app');
+      if (!app) return;
+      if (window.oniAPI && window.oniAPI.triggerOsAction) {
+        window.oniAPI.triggerOsAction({ type: 'edit-app', app });
+      }
     });
 
     document.getElementById('ctx-app-delete')?.addEventListener('click', async (e) => {

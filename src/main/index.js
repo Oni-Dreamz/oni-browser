@@ -1,14 +1,18 @@
 const { app, BrowserWindow, WebContentsView, ipcMain, shell, Menu, MenuItem, session, clipboard } = require('electron');
 const path = require('path');
+const fs = require('fs');
 const store = require('./store');
 const oniShield = require('./adblock');
 
 let mainWindow = null;
 let dockView = null;
+let modalsView = null;
 let tooltipView = null;
 let toastView = null;
 let contextMenuView = null;
 let dockBounds = { width: 340, height: 100, x: 0, y: 0 };
+let isModalsViewOpen = false;
+let pendingSaveAs = false;
 const tabs = new Map(); // tabId -> Tab object
 let activeTabId = null;
 let tabCounter = 0;
@@ -29,6 +33,24 @@ function sendToChromeAndDock(channel, payload) {
   if (dockView && dockView.webContents && !dockView.webContents.isDestroyed()) {
     dockView.webContents.send(channel, payload);
   }
+  if (modalsView && modalsView.webContents && !modalsView.webContents.isDestroyed()) {
+    modalsView.webContents.send(channel, payload);
+  }
+}
+
+function updateModalsViewBounds() {
+  if (!mainWindow || mainWindow.isDestroyed() || !modalsView) return;
+  if (!isModalsViewOpen || isOverlayActive || isHtmlFullscreen) {
+    modalsView.setVisible(false);
+    modalsView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+    return;
+  }
+  const [winWidth, winHeight] = mainWindow.getContentSize();
+  const y = topBarHeight;
+  const h = Math.max(0, winHeight - y);
+  mainWindow.contentView.addChildView(modalsView);
+  modalsView.setBounds({ x: 0, y, width: winWidth, height: h });
+  modalsView.setVisible(true);
 }
 
 function updateDockViewBounds() {
@@ -44,19 +66,11 @@ function updateDockViewBounds() {
   }
   dockView.setVisible(true);
   const [winWidth, winHeight] = mainWindow.getContentSize();
-  if (dockBounds.fullScreen) {
-    hideTooltipView();
-    const y = topBarHeight;
-    const h = Math.max(0, winHeight - y);
-    dockBounds.x = 0;
-    dockBounds.y = y;
-    dockView.setBounds({ x: 0, y, width: winWidth, height: h });
-    return;
-  }
+  const maxAvailHeight = Math.max(100, winHeight - topBarHeight);
   const w = Math.min(winWidth, Math.max(200, dockBounds.width || 340));
-  const h = 100;
+  const h = Math.min(maxAvailHeight, Math.max(100, dockBounds.height || 100));
   const x = Math.round((winWidth - w) / 2);
-  const y = Math.max(0, winHeight - h);
+  const y = Math.max(topBarHeight, winHeight - h);
   dockBounds.x = x;
   dockBounds.y = y;
   dockView.setBounds({ x, y, width: w, height: h });
@@ -87,7 +101,7 @@ function formatNavigationUrl(input) {
   return `${engineUrl}${encodeURIComponent(trimmed)}`;
 }
 
-function loadTabUrl(tab, url) {
+function loadTabUrl(tab, url, options = {}) {
   if (url === 'oni://newtab?mode=classic') {
     url = 'oni://newtab';
   }
@@ -113,7 +127,19 @@ function loadTabUrl(tab, url) {
     tab.favicon = 'assets/icon.png';
     tab.view.webContents.loadFile(path.join(__dirname, '../renderer/bookmarks.html'));
   } else {
-    tab.view.webContents.loadURL(url);
+    if (options.postData) {
+      const { data, contentType, boundary } = options.postData;
+      let extraHeaders = '';
+      if (contentType) {
+        extraHeaders = `content-type: ${contentType}${boundary ? '; boundary=' + boundary : ''}\n`;
+      }
+      tab.view.webContents.loadURL(url, {
+        postData: data,
+        extraHeaders
+      });
+    } else {
+      tab.view.webContents.loadURL(url);
+    }
   }
 }
 
@@ -148,6 +174,7 @@ function updateActiveViewBounds() {
     tab.view.setBounds(bounds);
   }
   updateDockViewBounds();
+  updateModalsViewBounds();
 }
 
 function canGoBack(wc) {
@@ -189,6 +216,9 @@ function createTab(initialUrl = 'oni://newtab', options = {}) {
       spellcheck: true
     }
   });
+  try {
+    view.setBackgroundColor('#08090d');
+  } catch (e) {}
 
   const tab = {
     id,
@@ -251,8 +281,24 @@ function createTab(initialUrl = 'oni://newtab', options = {}) {
     notifyTabUpdated(tab);
   });
 
+  wc.on('will-navigate', (event, navUrl) => {
+    if (/\.(exe|msi|zip|7z|dmg|pkg|tar|gz|rar)$/i.test(navUrl.split('?')[0])) {
+      event.preventDefault();
+      wc.downloadURL(navUrl);
+    }
+  });
+
   // Handle target="_blank" and window.open
-  wc.setWindowOpenHandler(({ url }) => {
+  wc.setWindowOpenHandler((details) => {
+    const { url, postBody } = details;
+    if (/\.(exe|msi|zip|7z|dmg|pkg|tar|gz|rar)$/i.test(url.split('?')[0])) {
+      wc.downloadURL(url);
+      return { action: 'deny' };
+    }
+    if (postBody && postBody.data) {
+      createTab(url, { postData: postBody });
+      return { action: 'deny' };
+    }
     createTab(url);
     return { action: 'deny' };
   });
@@ -358,7 +404,7 @@ function createTab(initialUrl = 'oni://newtab', options = {}) {
   tabs.set(id, tab);
 
   // Load URL
-  loadTabUrl(tab, initialUrl);
+  loadTabUrl(tab, initialUrl, options);
 
   // Switch to this new tab if requested
   if (switchToTab) {
@@ -470,12 +516,43 @@ function notifyTabUpdated(tab) {
 
 function setupDownloads() {
   const sess = session.defaultSession;
+  try {
+    sess.setDownloadPath(app.getPath('downloads'));
+  } catch (e) {}
+
+  // Automatically approve download permissions for programmatic downloads / redirects (e.g. OBS Studio)
+  sess.setPermissionRequestHandler((webContents, permission, callback) => {
+    callback(true);
+  });
+  sess.setPermissionCheckHandler((webContents, permission, requestingOrigin) => {
+    return true;
+  });
+
   sess.on('will-download', (event, item) => {
+    const baseFilename = item.getFilename() || 'download';
+    let savePath = '';
+
+    if (pendingSaveAs) {
+      pendingSaveAs = false;
+      // Do not set savePath: Electron will prompt the native Save As file dialog
+    } else {
+      const userDownloadsDir = app.getPath('downloads');
+      savePath = path.join(userDownloadsDir, baseFilename);
+      let counter = 1;
+      const ext = path.extname(baseFilename);
+      const nameWithoutExt = path.basename(baseFilename, ext);
+      while (fs.existsSync(savePath)) {
+        savePath = path.join(userDownloadsDir, `${nameWithoutExt} (${counter})${ext}`);
+        counter++;
+      }
+      item.setSavePath(savePath);
+    }
+
     const downloadId = 'dl_' + Date.now();
     const downloadItem = {
       id: downloadId,
-      filename: item.getFilename(),
-      path: item.getSavePath(),
+      filename: baseFilename,
+      path: savePath || item.getSavePath(),
       state: 'progressing',
       totalBytes: item.getTotalBytes(),
       receivedBytes: item.getReceivedBytes(),
@@ -486,6 +563,10 @@ function setupDownloads() {
 
     item.on('updated', (e, state) => {
       downloadItem.state = state;
+      downloadItem.path = item.getSavePath() || downloadItem.path;
+      if (downloadItem.path) {
+        downloadItem.filename = path.basename(downloadItem.path);
+      }
       downloadItem.receivedBytes = item.getReceivedBytes();
       store.addOrUpdateDownload(downloadItem);
       sendToChromeAndDock('download:progress', downloadItem);
@@ -493,7 +574,10 @@ function setupDownloads() {
 
     item.once('done', (e, state) => {
       downloadItem.state = state;
-      downloadItem.path = item.getSavePath();
+      downloadItem.path = item.getSavePath() || downloadItem.path;
+      if (downloadItem.path) {
+        downloadItem.filename = path.basename(downloadItem.path);
+      }
       downloadItem.receivedBytes = item.getReceivedBytes();
       store.addOrUpdateDownload(downloadItem);
       sendToChromeAndDock('download:progress', downloadItem);
@@ -517,6 +601,9 @@ function setupDownloads() {
 
 function bringDockAndTooltipToFront() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (modalsView) {
+    mainWindow.contentView.addChildView(modalsView);
+  }
   if (dockView) {
     mainWindow.contentView.addChildView(dockView);
   }
@@ -529,6 +616,26 @@ function bringDockAndTooltipToFront() {
   if (contextMenuView) {
     mainWindow.contentView.addChildView(contextMenuView);
   }
+}
+
+function createModalsView() {
+  modalsView = new WebContentsView({
+    webPreferences: {
+      preload: path.join(__dirname, '../preload/index.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true
+    }
+  });
+  try {
+    modalsView.setBackgroundColor('#00000000');
+  } catch (e) {
+    // ignore
+  }
+  mainWindow.contentView.addChildView(modalsView);
+  modalsView.webContents.loadFile(path.join(__dirname, '../renderer/modals.html'));
+  modalsView.setVisible(false);
+  modalsView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
 }
 
 function createToastView() {
@@ -686,7 +793,8 @@ function createWindow() {
     }
   });
 
-  // Create always-on-top Oni OS Dock view, separate Tooltip view, dedicated Toast view, and Context Menu view
+  // Create independent Modals view, always-on-top Oni OS Dock view, Tooltip view, Toast view, and Context Menu view
+  createModalsView();
   createDockView();
   createTooltipView();
   createToastView();
@@ -824,6 +932,15 @@ ipcMain.handle('tab:navigate', (event, { url, id }) => {
     const destUrl = formatNavigationUrl(url);
     loadTabUrl(tab, destUrl);
   }
+});
+
+ipcMain.handle('tab:forwardInputEvent', (event, inputEvent) => {
+  if (!activeTabId || !tabs.has(activeTabId)) return;
+  const tab = tabs.get(activeTabId);
+  if (!tab || !tab.view || tab.view.webContents.isDestroyed()) return;
+  try {
+    tab.view.webContents.sendInputEvent(inputEvent);
+  } catch (err) {}
 });
 
 ipcMain.handle('tab:stop', (event, id) => {
@@ -1111,6 +1228,12 @@ ipcMain.handle('ui:setOverlayOpen', (event, isOpen) => {
     tabs.get(activeTabId).view.setVisible(!isOverlayActive);
   }
   updateDockViewBounds();
+  updateModalsViewBounds();
+});
+
+ipcMain.handle('ui:setModalsOpen', (event, isOpen) => {
+  isModalsViewOpen = !!isOpen;
+  updateModalsViewBounds();
 });
 
 ipcMain.handle('ui:setDockBounds', (event, bounds) => {
@@ -1191,13 +1314,23 @@ ipcMain.handle('ui:getDockVisibility', () => {
 
 ipcMain.handle('os:triggerAction', (event, action) => {
   hideContextMenuView();
-  if (action === 'downloads') {
+  const actionType = (action && typeof action === 'object') ? action.type : action;
+  if (actionType === 'downloads') {
     hideToastView();
   }
-  if (action === 'home') {
+  if (actionType === 'home') {
     getOrCreateOniOsHomeTab(true);
     if (dockView && dockView.webContents && !dockView.webContents.isDestroyed()) {
       dockView.webContents.send('os:action', 'close-start-menu');
+    }
+    return;
+  }
+
+  // Route popup modals to independent modalsView
+  if (['search', 'spotlight', 'history', 'downloads', 'settings', 'pin-app', 'add-app', 'edit-app', 'close-modals'].includes(actionType)) {
+    if (modalsView && modalsView.webContents && !modalsView.webContents.isDestroyed()) {
+      modalsView.webContents.focus();
+      modalsView.webContents.send('os:action', action);
     }
     return;
   }
@@ -1224,13 +1357,19 @@ ipcMain.handle('context:action', async (event, { action, params = {} }) => {
       if (params.linkURL) clipboard.writeText(params.linkURL);
       break;
     case 'save-link-as':
-      if (params.linkURL) wc.downloadURL(params.linkURL);
+      if (params.linkURL) {
+        pendingSaveAs = true;
+        wc.downloadURL(params.linkURL);
+      }
       break;
     case 'open-image-new-tab':
       if (params.srcURL) createTab(params.srcURL);
       break;
     case 'save-image-as':
-      if (params.srcURL) wc.downloadURL(params.srcURL);
+      if (params.srcURL) {
+        pendingSaveAs = true;
+        wc.downloadURL(params.srcURL);
+      }
       break;
     case 'copy-image':
       if (typeof wc.copyImageAt === 'function') {
@@ -1278,6 +1417,7 @@ ipcMain.handle('context:action', async (event, { action, params = {} }) => {
       wc.reload();
       break;
     case 'save-page-as':
+      pendingSaveAs = true;
       wc.downloadURL(params.pageURL || wc.getURL());
       break;
     case 'print':
