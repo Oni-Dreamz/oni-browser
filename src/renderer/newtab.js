@@ -106,11 +106,31 @@
     return url;
   }
 
-  function launchUrlFromDesktop(targetUrl) {
+  async function launchUrlFromDesktop(targetUrl) {
     if (!targetUrl) return;
     targetUrl = normalizeUrlForLaunch(targetUrl);
     if (osStartMenu) osStartMenu.classList.add('hidden');
     closeOsWindow('os-win-spotlight');
+
+    // If an existing open tab matches this URL, switch to it (same as Start Menu pins)
+    if (window.oniAPI && window.oniAPI.getTabs && window.oniAPI.switchTab) {
+      try {
+        const allTabs = await window.oniAPI.getTabs();
+        if (Array.isArray(allTabs)) {
+          const normTarget = targetUrl.replace(/\/+$/, '').toLowerCase();
+          const existing = allTabs.find(t => {
+            if (!t || !t.url || t.isDesktopHome === true || t.url === 'oni://home') return false;
+            const normTab = t.url.replace(/\/+$/, '').toLowerCase();
+            return normTab === normTarget || (normTarget.startsWith('http') && normTab.startsWith(normTarget));
+          });
+          if (existing) {
+            window.oniAPI.switchTab(existing.id);
+            return;
+          }
+        }
+      } catch (e) {}
+    }
+
     if (document.body.dataset.layout === 'desktop' && window.oniAPI && window.oniAPI.createTab) {
       window.oniAPI.createTab(targetUrl);
     } else if (window.oniAPI && window.oniAPI.navigate) {
@@ -1487,11 +1507,30 @@
 
     try {
       if (updater.checkForUpdates) {
-        await updater.checkForUpdates();
+        const res = await updater.checkForUpdates();
+        if (res && (res.status === 'portable' || res.status === 'dev')) {
+          updateState.status = 'idle';
+          updateState.checkedOnce = true;
+          updateState.isPortable = res.status === 'portable';
+          updateState.errorMessage = '';
+        } else if (res && res.status === 'success') {
+          if (updateState.status === 'checking') {
+            updateState.status = 'idle';
+            updateState.checkedOnce = true;
+            updateState.errorMessage = '';
+          }
+        } else if (res && res.status === 'error') {
+          updateState.status = 'error';
+          updateState.errorMessage = res.message || 'Unable to check for updates';
+        }
+        updateDomUpdateCard(container);
       }
     } catch (err) {
       updateState.status = 'error';
-      updateState.errorMessage = err?.message || 'Failed to check for updates';
+      const cleanMsg = (err?.message || 'Failed to check for updates')
+        .replace(/^Error invoking remote method '[^']+':\s*/i, '')
+        .replace(/^Error:\s*/i, '');
+      updateState.errorMessage = cleanMsg;
       updateDomUpdateCard(container);
     }
   }

@@ -8,13 +8,67 @@ const oniShield = require('./adblock');
 // Disable Blink automation features so navigator.webdriver is not flagged by Turnstile/Cloudflare
 app.commandLine.appendSwitch('disable-blink-features', 'AutomationControlled');
 
+// Helper to extract incoming URL or file path from command line arguments
+function extractUrlFromArgs(args) {
+  if (!args || !Array.isArray(args)) return null;
+  const startIndex = app.isPackaged ? 1 : 2;
+  for (let i = startIndex; i < args.length; i++) {
+    const arg = args[i];
+    if (!arg || typeof arg !== 'string') continue;
+    if (arg.startsWith('--') || arg.startsWith('/')) continue;
+    if (arg.startsWith('http://') || arg.startsWith('https://') || arg.startsWith('file://')) {
+      return arg;
+    }
+    const lower = arg.toLowerCase();
+    if (lower.endsWith('.html') || lower.endsWith('.htm') || lower.endsWith('.svg') || lower.endsWith('.pdf')) {
+      return 'file:///' + path.resolve(arg).replace(/\\/g, '/');
+    }
+  }
+  return null;
+}
+
+// Enforce single instance lock for browser behavior
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+  process.exit(0);
+}
+
+app.on('second-instance', (_event, commandLine) => {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  }
+  const incomingUrl = extractUrlFromArgs(commandLine);
+  if (incomingUrl) {
+    createTab(incomingUrl);
+  }
+});
+
+// Register as default protocol client for HTTP and HTTPS
+try {
+  if (process.defaultApp) {
+    if (process.argv.length >= 2) {
+      app.setAsDefaultProtocolClient('http', process.execPath, [path.resolve(process.argv[1])]);
+      app.setAsDefaultProtocolClient('https', process.execPath, [path.resolve(process.argv[1])]);
+    }
+  } else {
+    app.setAsDefaultProtocolClient('http');
+    app.setAsDefaultProtocolClient('https');
+  }
+} catch (e) {
+  console.warn('[Protocol] Could not set default protocol client:', e.message);
+}
+
 let mainWindow = null;
 let dockView = null;
+let startMenuView = null;
 let modalsView = null;
 let tooltipView = null;
 let toastView = null;
 let contextMenuView = null;
 let dockBounds = { width: 340, height: 100, x: 0, y: 0 };
+let isStartMenuViewOpen = false;
 let isModalsViewOpen = false;
 let pendingSaveAs = false;
 const tabs = new Map(); // tabId -> Tab object
@@ -37,6 +91,9 @@ function sendToChromeAndDock(channel, payload) {
   }
   if (dockView && dockView.webContents && !dockView.webContents.isDestroyed()) {
     dockView.webContents.send(channel, payload);
+  }
+  if (startMenuView && startMenuView.webContents && !startMenuView.webContents.isDestroyed()) {
+    startMenuView.webContents.send(channel, payload);
   }
   if (modalsView && modalsView.webContents && !modalsView.webContents.isDestroyed()) {
     modalsView.webContents.send(channel, payload);
@@ -61,16 +118,20 @@ autoUpdater.logger = {
 };
 
 function broadcastUpdaterEvent(data) {
-  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
-    mainWindow.webContents.send('updater-event', data);
-  }
-  if (modalsView && !modalsView.isDestroyed() && modalsView.webContents) {
-    modalsView.webContents.send('updater-event', data);
-  }
-  for (const tab of tabs.values()) {
-    if (tab.view && tab.view.webContents && !tab.view.webContents.isDestroyed()) {
-      tab.view.webContents.send('updater-event', data);
+  try {
+    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
+      mainWindow.webContents.send('updater-event', data);
     }
+    if (modalsView && modalsView.webContents && !modalsView.webContents.isDestroyed()) {
+      modalsView.webContents.send('updater-event', data);
+    }
+    for (const tab of tabs.values()) {
+      if (tab.view && tab.view.webContents && !tab.view.webContents.isDestroyed()) {
+        tab.view.webContents.send('updater-event', data);
+      }
+    }
+  } catch (err) {
+    console.warn('[AutoUpdater] Broadcast error:', err.message);
   }
 }
 
@@ -140,6 +201,40 @@ function updateModalsViewBounds() {
   mainWindow.contentView.addChildView(modalsView);
   modalsView.setBounds({ x: 0, y, width: winWidth, height: h });
   modalsView.setVisible(true);
+  bringDockAndTooltipToFront();
+}
+
+function updateStartMenuViewBounds() {
+  if (!mainWindow || mainWindow.isDestroyed() || !startMenuView) return;
+  const [winWidth, winHeight] = mainWindow.getContentSize();
+  const y = topBarHeight;
+  const h = Math.max(100, winHeight - y);
+  if (!isOniOsThemeActive() || !isStartMenuViewOpen || isOverlayActive || isHtmlFullscreen || isDockHiddenByUser) {
+    startMenuView.setVisible(false);
+    startMenuView.setBounds({ x: 0, y: winHeight + 100, width: winWidth, height: h });
+    return;
+  }
+  startMenuView.setBounds({ x: 0, y, width: winWidth, height: h });
+  startMenuView.setVisible(true);
+  bringDockAndTooltipToFront();
+}
+
+function openStartMenuView() {
+  if (!startMenuView || !startMenuView.webContents || startMenuView.webContents.isDestroyed()) return;
+  isStartMenuViewOpen = true;
+  updateStartMenuViewBounds();
+  startMenuView.webContents.focus();
+  startMenuView.webContents.send('os:action', 'start-menu-open');
+}
+
+function closeStartMenuView() {
+  if (startMenuView && startMenuView.webContents && !startMenuView.webContents.isDestroyed()) {
+    startMenuView.webContents.send('os:action', 'close-start-menu');
+  }
+  if (isStartMenuViewOpen) {
+    isStartMenuViewOpen = false;
+    updateStartMenuViewBounds();
+  }
 }
 
 function updateDockViewBounds() {
@@ -155,9 +250,8 @@ function updateDockViewBounds() {
   }
   dockView.setVisible(true);
   const [winWidth, winHeight] = mainWindow.getContentSize();
-  const maxAvailHeight = Math.max(100, winHeight - topBarHeight);
   const w = Math.min(winWidth, Math.max(200, dockBounds.width || 340));
-  const h = Math.min(maxAvailHeight, Math.max(100, dockBounds.height || 100));
+  const h = 100;
   const x = Math.round((winWidth - w) / 2);
   const y = Math.max(topBarHeight, winHeight - h);
   dockBounds.x = x;
@@ -271,6 +365,7 @@ function updateActiveViewBounds() {
     tab.view.setBounds(bounds);
   }
   updateDockViewBounds();
+  updateStartMenuViewBounds();
   updateModalsViewBounds();
 }
 
@@ -304,14 +399,31 @@ function triggerOsActionDirect(action) {
   }
   if (actionType === 'home') {
     getOrCreateOniOsHomeTab(true);
-    if (dockView && dockView.webContents && !dockView.webContents.isDestroyed()) {
-      dockView.webContents.send('os:action', 'close-start-menu');
+    closeStartMenuView();
+    return;
+  }
+
+  // Route Start Menu actions to dedicated startMenuView so dockView never resizes
+  if (actionType === 'start-menu') {
+    if (isStartMenuViewOpen) {
+      closeStartMenuView();
+    } else {
+      openStartMenuView();
     }
+    return;
+  }
+  if (actionType === 'start-menu-open') {
+    openStartMenuView();
+    return;
+  }
+  if (actionType === 'close-start-menu') {
+    closeStartMenuView();
     return;
   }
 
   // Route popup modals to independent modalsView
   if (['search', 'spotlight', 'history', 'downloads', 'settings', 'pin-app', 'add-app', 'edit-app', 'close-modals'].includes(actionType)) {
+    closeStartMenuView();
     if (modalsView && modalsView.webContents && !modalsView.webContents.isDestroyed()) {
       modalsView.webContents.focus();
       modalsView.webContents.send('os:action', action);
@@ -497,9 +609,7 @@ function setupShortcutsForWebContents(wc) {
         mainWindow.webContents.send('shortcut:escape');
       }
       triggerOsActionDirect('close-modals');
-      if (dockView && dockView.webContents && !dockView.webContents.isDestroyed()) {
-        dockView.webContents.send('os:action', 'close-start-menu');
-      }
+      closeStartMenuView();
       return;
     }
 
@@ -783,6 +893,7 @@ function getOrCreateOniOsHomeTab(switchToIt = false) {
 function switchTab(tabId) {
   if (!tabs.has(tabId)) return;
   hideContextMenuView();
+  closeStartMenuView();
 
   // Hide all views except the active one
   for (const [id, tab] of tabs.entries()) {
@@ -984,6 +1095,9 @@ function bringDockAndTooltipToFront() {
   if (modalsView) {
     mainWindow.contentView.addChildView(modalsView);
   }
+  if (startMenuView) {
+    mainWindow.contentView.addChildView(startMenuView);
+  }
   if (dockView) {
     mainWindow.contentView.addChildView(dockView);
   }
@@ -1116,6 +1230,29 @@ function hideContextMenuView() {
   }
 }
 
+function createStartMenuView() {
+  startMenuView = new WebContentsView({
+    webPreferences: {
+      preload: path.join(__dirname, '../preload/index.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true
+    }
+  });
+  try {
+    startMenuView.setBackgroundColor('#00000000');
+  } catch (e) {
+    // ignore
+  }
+  mainWindow.contentView.addChildView(startMenuView);
+  setupShortcutsForWebContents(startMenuView.webContents);
+  startMenuView.webContents.loadFile(path.join(__dirname, '../renderer/dock.html'), {
+    query: { mode: 'startmenu' }
+  });
+  startMenuView.setVisible(false);
+  startMenuView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+}
+
 function createDockView() {
   dockView = new WebContentsView({
     webPreferences: {
@@ -1132,7 +1269,9 @@ function createDockView() {
   }
   mainWindow.contentView.addChildView(dockView);
   setupShortcutsForWebContents(dockView.webContents);
-  dockView.webContents.loadFile(path.join(__dirname, '../renderer/dock.html'));
+  dockView.webContents.loadFile(path.join(__dirname, '../renderer/dock.html'), {
+    query: { mode: 'dock' }
+  });
   updateDockViewBounds();
 }
 
@@ -1175,8 +1314,9 @@ function createWindow() {
     }
   });
 
-  // Create independent Modals view, always-on-top Oni OS Dock view, Tooltip view, Toast view, and Context Menu view
+  // Create independent Modals view, Start Menu view, always-on-top Oni OS Dock view, Tooltip view, Toast view, and Context Menu view
   createModalsView();
+  createStartMenuView();
   createDockView();
   createTooltipView();
   createToastView();
@@ -1207,9 +1347,12 @@ function createWindow() {
 
   // When UI is ready, spawn the persistent Oni OS home tab and initial browser tab
   mainWindow.webContents.once('did-finish-load', () => {
-    const startInOs = isOniOsThemeActive();
+    const initialUrl = extractUrlFromArgs(process.argv);
+    const startInOs = !initialUrl && isOniOsThemeActive();
     getOrCreateOniOsHomeTab(startInOs);
-    if (!startInOs) {
+    if (initialUrl) {
+      createTab(initialUrl);
+    } else if (!startInOs) {
       createTab('oni://newtab');
     }
   });
@@ -1274,9 +1417,94 @@ app.on('window-all-closed', () => {
 });
 
 // IPC Handlers
-ipcMain.handle('check-for-updates', () => autoUpdater.checkForUpdates());
-ipcMain.handle('install-update', () => autoUpdater.quitAndInstall());
+ipcMain.handle('check-for-updates', async () => {
+  // Check if running as portable standalone edition or without update config
+  const hasAppUpdateYml = fs.existsSync(path.join(process.resourcesPath || '', 'app-update.yml'));
+  const isPortable = !!process.env.PORTABLE_EXECUTABLE_DIR ||
+    (process.execPath && /standalone|portable/i.test(process.execPath)) ||
+    (app.isPackaged && !hasAppUpdateYml);
+
+  if (isPortable) {
+    const portableMsg = 'Oni Browser Portable Standalone is running the latest build.';
+    broadcastUpdaterEvent({
+      event: 'update-not-available',
+      status: 'not-available',
+      message: portableMsg,
+      version: app.getVersion()
+    });
+    return {
+      status: 'portable',
+      message: portableMsg,
+      version: app.getVersion()
+    };
+  }
+
+  if (!app.isPackaged) {
+    const devMsg = 'Development build (v' + app.getVersion() + ') is active.';
+    broadcastUpdaterEvent({
+      event: 'update-not-available',
+      status: 'not-available',
+      message: devMsg,
+      version: app.getVersion()
+    });
+    return {
+      status: 'dev',
+      message: devMsg,
+      version: app.getVersion()
+    };
+  }
+
+  try {
+    const res = await autoUpdater.checkForUpdates();
+    return {
+      status: 'success',
+      updateInfo: res?.updateInfo
+    };
+  } catch (err) {
+    console.warn('[AutoUpdater] Manual check error:', err.message);
+    const cleanMsg = (err?.message || 'Update check failed')
+      .replace(/^Error invoking remote method '[^']+':\s*/i, '')
+      .replace(/^Error:\s*/i, '');
+    broadcastUpdaterEvent({
+      event: 'error',
+      status: 'error',
+      message: cleanMsg
+    });
+    return {
+      status: 'error',
+      message: cleanMsg
+    };
+  }
+});
+
+ipcMain.handle('install-update', () => {
+  try {
+    return autoUpdater.quitAndInstall();
+  } catch (err) {
+    console.warn('[AutoUpdater] Install error:', err.message);
+  }
+});
+
 ipcMain.handle('get-app-version', () => app.getVersion());
+
+ipcMain.handle('app:isDefaultBrowser', () => {
+  try {
+    return app.isDefaultProtocolClient('http') && app.isDefaultProtocolClient('https');
+  } catch (e) {
+    return false;
+  }
+});
+
+ipcMain.handle('app:setAsDefaultBrowser', async () => {
+  let success = false;
+  try {
+    success = app.setAsDefaultProtocolClient('http') && app.setAsDefaultProtocolClient('https');
+  } catch (e) {}
+  if (process.platform === 'win32') {
+    shell.openExternal('ms-settings:defaultapps');
+  }
+  return success;
+});
 
 ipcMain.handle('window:minimize', () => {
   if (mainWindow) mainWindow.minimize();
@@ -1713,6 +1941,7 @@ ipcMain.handle('ui:setOverlayOpen', (event, isOpen) => {
     tabs.get(activeTabId).view.setVisible(!isOverlayActive);
   }
   updateDockViewBounds();
+  updateStartMenuViewBounds();
   updateModalsViewBounds();
 });
 
@@ -1721,11 +1950,17 @@ ipcMain.handle('ui:setModalsOpen', (event, isOpen) => {
   updateModalsViewBounds();
 });
 
+ipcMain.handle('ui:setStartMenuOpen', (event, isOpen) => {
+  isStartMenuViewOpen = !!isOpen;
+  updateStartMenuViewBounds();
+  return true;
+});
+
 ipcMain.handle('ui:setDockBounds', (event, bounds) => {
   if (bounds && typeof bounds.width === 'number') {
     dockBounds.width = bounds.width;
-    dockBounds.height = bounds.height || 100;
-    dockBounds.fullScreen = !!bounds.fullScreen;
+    dockBounds.height = 100;
+    dockBounds.fullScreen = false;
     updateDockViewBounds();
   }
 });
@@ -1785,7 +2020,11 @@ ipcMain.handle('ui:toggleDock', (event, explicitState) => {
   } else {
     isDockHiddenByUser = !isDockHiddenByUser;
   }
+  if (isDockHiddenByUser) {
+    closeStartMenuView();
+  }
   updateDockViewBounds();
+  updateStartMenuViewBounds();
   const isVisible = !isDockHiddenByUser;
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('ui:dockVisibilityChange', isVisible);

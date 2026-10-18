@@ -14,6 +14,9 @@ if (window.location.protocol === 'file:') {
 
   contextBridge.exposeInMainWorld('oniAPI', {
     updater: updaterAPI,
+    // System & Default Browser
+    setAsDefaultBrowser: () => ipcRenderer.invoke('app:setAsDefaultBrowser'),
+    isDefaultBrowser: () => ipcRenderer.invoke('app:isDefaultBrowser'),
     // Window controls
     minimize: () => ipcRenderer.invoke('window:minimize'),
     maximize: () => ipcRenderer.invoke('window:maximize'),
@@ -105,6 +108,7 @@ if (window.location.protocol === 'file:') {
     setOverlayOpen: (isOpen) => ipcRenderer.invoke('ui:setOverlayOpen', isOpen),
     setDockBounds: (bounds) => ipcRenderer.invoke('ui:setDockBounds', bounds),
     setModalsOpen: (isOpen) => ipcRenderer.invoke('ui:setModalsOpen', isOpen),
+    setStartMenuOpen: (isOpen) => ipcRenderer.invoke('ui:setStartMenuOpen', isOpen),
     focusDock: () => ipcRenderer.invoke('dock:focus'),
     toggleDock: (state) => ipcRenderer.invoke('ui:toggleDock', state),
     getDockVisibility: () => ipcRenderer.invoke('ui:getDockVisibility'),

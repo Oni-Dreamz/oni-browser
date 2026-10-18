@@ -619,10 +619,11 @@
     }
     // Idle state
     if (state.checkedOnce) {
+      const label = state.isPortable ? 'Portable Standalone (Up to date)' : 'Up to date';
       return `
         <div class="os-update-status-uptodate">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
-          <span>Up to date</span>
+          <span>${label}</span>
         </div>
       `;
     }
@@ -695,11 +696,30 @@
 
     try {
       if (updater.checkForUpdates) {
-        await updater.checkForUpdates();
+        const res = await updater.checkForUpdates();
+        if (res && (res.status === 'portable' || res.status === 'dev')) {
+          updateState.status = 'idle';
+          updateState.checkedOnce = true;
+          updateState.isPortable = res.status === 'portable';
+          updateState.errorMessage = '';
+        } else if (res && res.status === 'success') {
+          if (updateState.status === 'checking') {
+            updateState.status = 'idle';
+            updateState.checkedOnce = true;
+            updateState.errorMessage = '';
+          }
+        } else if (res && res.status === 'error') {
+          updateState.status = 'error';
+          updateState.errorMessage = res.message || 'Unable to check for updates';
+        }
+        updateDomUpdateCard(container);
       }
     } catch (err) {
       updateState.status = 'error';
-      updateState.errorMessage = err?.message || 'Failed to check for updates';
+      const cleanMsg = (err?.message || 'Failed to check for updates')
+        .replace(/^Error invoking remote method '[^']+':\s*/i, '')
+        .replace(/^Error:\s*/i, '');
+      updateState.errorMessage = cleanMsg;
       updateDomUpdateCard(container);
     }
   }
@@ -746,6 +766,7 @@
       } else if (evt === 'update-not-available' || data.status === 'not-available') {
         updateState.status = 'idle';
         updateState.checkedOnce = true;
+        updateState.isPortable = data.status === 'portable' || (data.message && data.message.includes('Portable'));
         updateState.errorMessage = '';
       } else if (evt === 'download-progress' || data.status === 'downloading') {
         updateState.status = 'downloading';
@@ -757,7 +778,10 @@
         updateState.errorMessage = '';
       } else if (evt === 'error' || data.status === 'error') {
         updateState.status = 'error';
-        updateState.errorMessage = data.message || 'Error checking for updates';
+        const cleanMsg = (data.message || 'Error checking for updates')
+          .replace(/^Error invoking remote method '[^']+':\s*/i, '')
+          .replace(/^Error:\s*/i, '');
+        updateState.errorMessage = cleanMsg;
       }
       updateDomUpdateCard(settingsBody);
     });

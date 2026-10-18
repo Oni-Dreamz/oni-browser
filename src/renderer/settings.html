@@ -108,6 +108,16 @@
       <div class="os-update-status-row" id="page-update-status-row"></div>
     </div>
 
+    <div class="setting-group" style="display: flex; align-items: center; justify-content: space-between;">
+      <div>
+        <div class="setting-label">Default Web Browser</div>
+        <div class="setting-desc" id="setting-default-browser-desc">Make Oni Browser your default browser for opening web links and documents.</div>
+      </div>
+      <button type="button" class="btn-primary" id="btn-set-default-browser" style="white-space: nowrap; padding: 7px 14px; font-size: 12px;">
+        Set as Default
+      </button>
+    </div>
+
     <div class="setting-group">
       <div class="setting-label">Default Search Engine</div>
       <div class="setting-desc">Sets default search provider for omnibox queries.</div>
@@ -196,8 +206,48 @@
       const engineSelect = document.getElementById('setting-engine');
       const bmBarToggle = document.getElementById('setting-bm-bar');
       const shieldToggle = document.getElementById('setting-shield');
+      const btnSetDefaultBrowser = document.getElementById('btn-set-default-browser');
+      const descDefaultBrowser = document.getElementById('setting-default-browser-desc');
+
+      async function checkDefaultBrowserStatus() {
+        if (!window.oniAPI || !window.oniAPI.isDefaultBrowser) return;
+        try {
+          const isDef = await window.oniAPI.isDefaultBrowser();
+          if (isDef) {
+            if (btnSetDefaultBrowser) {
+              btnSetDefaultBrowser.textContent = 'Default Browser';
+              btnSetDefaultBrowser.disabled = true;
+              btnSetDefaultBrowser.style.opacity = '0.6';
+              btnSetDefaultBrowser.style.cursor = 'default';
+            }
+            if (descDefaultBrowser) {
+              descDefaultBrowser.textContent = 'Oni Browser is currently your default web browser.';
+            }
+          } else {
+            if (btnSetDefaultBrowser) {
+              btnSetDefaultBrowser.textContent = 'Set as Default';
+              btnSetDefaultBrowser.disabled = false;
+              btnSetDefaultBrowser.style.opacity = '1';
+              btnSetDefaultBrowser.style.cursor = 'pointer';
+            }
+            if (descDefaultBrowser) {
+              descDefaultBrowser.textContent = 'Make Oni Browser your default browser for opening web links and documents.';
+            }
+          }
+        } catch (e) {}
+      }
+
+      if (btnSetDefaultBrowser) {
+        btnSetDefaultBrowser.addEventListener('click', async () => {
+          if (window.oniAPI && window.oniAPI.setAsDefaultBrowser) {
+            await window.oniAPI.setAsDefaultBrowser();
+            setTimeout(checkDefaultBrowserStatus, 1500);
+          }
+        });
+      }
 
       async function loadPageSettings() {
+        checkDefaultBrowserStatus();
         const [settings, themes, activeTheme] = await Promise.all([
           window.oniAPI.getSettings(),
           window.oniAPI.getThemes(),
@@ -438,11 +488,29 @@
 
         try {
           if (updater.checkForUpdates) {
-            await updater.checkForUpdates();
+            const res = await updater.checkForUpdates();
+            if (res && (res.status === 'portable' || res.status === 'dev')) {
+              pageUpdateState.status = 'idle';
+              pageUpdateState.checkedOnce = true;
+              pageUpdateState.errorMessage = '';
+            } else if (res && res.status === 'success') {
+              if (pageUpdateState.status === 'checking') {
+                pageUpdateState.status = 'idle';
+                pageUpdateState.checkedOnce = true;
+                pageUpdateState.errorMessage = '';
+              }
+            } else if (res && res.status === 'error') {
+              pageUpdateState.status = 'error';
+              pageUpdateState.errorMessage = res.message || 'Unable to check for updates';
+            }
+            updatePageUpdateUI();
           }
         } catch (err) {
           pageUpdateState.status = 'error';
-          pageUpdateState.errorMessage = err?.message || 'Failed to check for updates';
+          const cleanMsg = (err?.message || 'Failed to check for updates')
+            .replace(/^Error invoking remote method '[^']+':\s*/i, '')
+            .replace(/^Error:\s*/i, '');
+          pageUpdateState.errorMessage = cleanMsg;
           updatePageUpdateUI();
         }
       }

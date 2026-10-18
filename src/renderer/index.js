@@ -1021,11 +1021,30 @@
 
     try {
       if (updater.checkForUpdates) {
-        await updater.checkForUpdates();
+        const res = await updater.checkForUpdates();
+        if (res && (res.status === 'portable' || res.status === 'dev')) {
+          updateState.status = 'idle';
+          updateState.checkedOnce = true;
+          updateState.isPortable = res.status === 'portable';
+          updateState.errorMessage = '';
+        } else if (res && res.status === 'success') {
+          if (updateState.status === 'checking') {
+            updateState.status = 'idle';
+            updateState.checkedOnce = true;
+            updateState.errorMessage = '';
+          }
+        } else if (res && res.status === 'error') {
+          updateState.status = 'error';
+          updateState.errorMessage = res.message || 'Unable to check for updates';
+        }
+        updateDomUpdateCard(container);
       }
     } catch (err) {
       updateState.status = 'error';
-      updateState.errorMessage = err?.message || 'Failed to check for updates';
+      const cleanMsg = (err?.message || 'Failed to check for updates')
+        .replace(/^Error invoking remote method '[^']+':\s*/i, '')
+        .replace(/^Error:\s*/i, '');
+      updateState.errorMessage = cleanMsg;
       updateDomUpdateCard(container);
     }
   }

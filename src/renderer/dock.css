@@ -55,9 +55,12 @@ html, body {
 
 /* Always-on-Top Oni OS Start Menu Flyout */
 .os-start-menu {
+  position: absolute;
+  bottom: 192px;
+  left: 50%;
+  transform: translateX(-50%);
   width: 440px;
   max-width: calc(100vw - 24px);
-  margin-bottom: 12px;
   background: rgba(10, 14, 24, 0.96);
   border: 1px solid rgba(var(--accent-rgb), 0.38);
   border-radius: 18px;
@@ -70,8 +73,8 @@ html, body {
 }
 
 @keyframes osStartIn {
-  from { opacity: 0; transform: translateY(10px) scale(0.97); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+  from { opacity: 0; transform: translate(-50%, 10px) scale(0.97); }
+  to { opacity: 1; transform: translate(-50%, 0) scale(1); }
 }
 
 .os-start-header {

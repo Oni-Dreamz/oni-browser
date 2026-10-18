@@ -2,6 +2,9 @@
 (function () {
   'use strict';
 
+  const isStartMenuMode = window.location.search.includes('mode=startmenu');
+  const isDockMode = !isStartMenuMode;
+
   const dockEl = document.getElementById('os-dock');
   const dockBarWrap = document.getElementById('dock-bar-wrap');
   const dockTabsWrap = document.getElementById('os-dock-tabs-wrap');
@@ -22,18 +25,27 @@
   let tabs = [];
   let activeTabId = null;
   let isStartMenuOpen = false;
+  let lastReportedDockWidth = 0;
 
   const appCtxMenu = document.getElementById('os-app-context-menu');
   let activeContextApp = null;
+
+  if (isStartMenuMode && dockBarWrap) {
+    dockBarWrap.style.display = 'none';
+  }
+  if (isDockMode) {
+    if (startMenuEl) startMenuEl.style.display = 'none';
+    if (appCtxMenu) appCtxMenu.style.display = 'none';
+  }
 
   function showAppContextMenu(clientX, clientY, app) {
     if (!appCtxMenu) return;
     activeContextApp = app;
     appCtxMenu.classList.remove('hidden');
     const menuW = appCtxMenu.offsetWidth || 240;
-    const menuH = appCtxMenu.offsetHeight || 220;
+    const menuH = appCtxMenu.offsetHeight || 200;
     const x = Math.min(window.innerWidth - menuW - 16, Math.max(16, clientX));
-    const y = Math.min(window.innerHeight - menuH - 16, Math.max(16, clientY));
+    const y = Math.min(window.innerHeight - menuH - 90, Math.max(16, clientY));
     appCtxMenu.style.left = `${x}px`;
     appCtxMenu.style.top = `${y}px`;
   }
@@ -63,47 +75,67 @@
   }
 
   function reportBounds() {
-    if (!dockEl || !window.oniAPI || !window.oniAPI.setDockBounds) return;
-    requestAnimationFrame(() => {
-      const dockWidth = Math.min(1040, dockEl.offsetWidth || 70);
-      let calculatedHeight = 100;
-      if (isStartMenuOpen) {
-        const startMenuH = startMenuEl ? Math.max(startMenuEl.offsetHeight || 0, 390) : 400;
-        const dockH = dockEl ? (dockEl.offsetHeight || 60) : 60;
-        calculatedHeight = Math.max(520, startMenuH + dockH + 40);
-      }
-      const width = isStartMenuOpen ? Math.max(dockWidth + 160, 820) : dockWidth + 160;
-      window.oniAPI.setDockBounds({
-        width,
-        height: calculatedHeight,
-        isStartMenuOpen
-      });
+    if (!isDockMode || !dockEl || !window.oniAPI || !window.oniAPI.setDockBounds) return;
+    const dockWidth = Math.min(1040, dockEl.offsetWidth || 70);
+    const width = dockWidth + 120;
+    if (width === lastReportedDockWidth) return;
+    lastReportedDockWidth = width;
+    window.oniAPI.setDockBounds({
+      width,
+      height: 100,
+      fullScreen: false
     });
   }
 
   function openStartMenu() {
+    if (isDockMode) {
+      hideTooltip();
+      if (window.oniAPI && window.oniAPI.triggerOsAction) {
+        window.oniAPI.triggerOsAction('start-menu-open');
+      }
+      return;
+    }
     if (!startMenuEl) return;
     isStartMenuOpen = true;
-    hideTooltip();
-    startMenuEl.classList.remove('hidden');
     renderStartMenuApps();
-    reportBounds();
+    if (window.oniAPI && window.oniAPI.setStartMenuOpen) {
+      window.oniAPI.setStartMenuOpen(true);
+    }
+    startMenuEl.classList.remove('hidden');
   }
 
   function closeStartMenu() {
+    if (isDockMode) {
+      if (window.oniAPI && window.oniAPI.triggerOsAction) {
+        window.oniAPI.triggerOsAction('close-start-menu');
+      }
+      return;
+    }
     if (!startMenuEl || !isStartMenuOpen) return;
     isStartMenuOpen = false;
     isStartMenuEditMode = false;
+    hideAppContextMenu();
     if (startBtnEdit) {
       startBtnEdit.textContent = 'Edit';
       startBtnEdit.classList.remove('active');
     }
     startMenuEl.classList.add('hidden');
     renderStartMenuApps();
-    reportBounds();
+    requestAnimationFrame(() => {
+      if (!isStartMenuOpen && window.oniAPI && window.oniAPI.setStartMenuOpen) {
+        window.oniAPI.setStartMenuOpen(false);
+      }
+    });
   }
 
   function toggleStartMenu() {
+    if (isDockMode) {
+      hideTooltip();
+      if (window.oniAPI && window.oniAPI.triggerOsAction) {
+        window.oniAPI.triggerOsAction('start-menu');
+      }
+      return;
+    }
     if (isStartMenuOpen) {
       closeStartMenu();
     } else {
@@ -280,7 +312,7 @@
   let draggedDockTabId = null;
 
   function renderDockTabs() {
-    if (!dockTabsEl) return;
+    if (!isDockMode || !dockTabsEl) return;
     dockTabsEl.innerHTML = '';
 
     const webTabs = tabs.filter(t => !isDesktopHomeTab(t));
@@ -568,9 +600,6 @@
     window.addEventListener('blur', () => {
       hideTooltip();
       hideAppContextMenu();
-      if (isStartMenuOpen) {
-        closeStartMenu();
-      }
     });
 
     if (dockTabsEl) {

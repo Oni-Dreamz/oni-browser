@@ -8,9 +8,9 @@
   "scripts": {
     "start": "electron .",
     "make-ico": "electron scripts/make-ico.js",
-    "build:installer": "electron-builder --win nsis",
-    "build:portable": "electron-builder --win portable",
-    "build": "electron-builder --win nsis"
+    "build:installer": "node --use-system-ca ./node_modules/electron-builder/cli.js --win nsis",
+    "build:portable": "node --use-system-ca ./node_modules/electron-builder/cli.js --win portable",
+    "build": "node --use-system-ca ./node_modules/electron-builder/cli.js --win nsis"
   },
   "build": {
     "appId": "com.onilab.onibrowser",
@@ -42,13 +42,43 @@
         }
       ]
     },
+    "protocols": [
+      {
+        "name": "HTTP",
+        "schemes": [
+          "http"
+        ]
+      },
+      {
+        "name": "HTTPS",
+        "schemes": [
+          "https"
+        ]
+      }
+    ],
+    "fileAssociations": [
+      {
+        "ext": "html",
+        "name": "HTML Document",
+        "description": "HTML Document",
+        "role": "Viewer"
+      },
+      {
+        "ext": "htm",
+        "name": "HTML Document",
+        "description": "HTML Document",
+        "role": "Viewer"
+      }
+    ],
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Oni Browser",
-      "artifactName": "Oni-Browser-Setup-${version}.${ext}"
+      "uninstallDisplayName": "${productName}",
+      "artifactName": "Oni-Browser-Setup-${version}.${ext}",
+      "include": "scripts/installer.nsh"
     },
     "portable": {
       "artifactName": "Oni Browser Standalone.exe"
