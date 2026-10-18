@@ -1,8 +1,12 @@
 const { app, BrowserWindow, WebContentsView, ipcMain, shell, Menu, MenuItem, session, clipboard, dialog } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fs = require('fs');
 const store = require('./store');
 const oniShield = require('./adblock');
+
+// Disable Blink automation features so navigator.webdriver is not flagged by Turnstile/Cloudflare
+app.commandLine.appendSwitch('disable-blink-features', 'AutomationControlled');
 
 let mainWindow = null;
 let dockView = null;
@@ -14,6 +18,7 @@ let dockBounds = { width: 340, height: 100, x: 0, y: 0 };
 let isModalsViewOpen = false;
 let pendingSaveAs = false;
 const tabs = new Map(); // tabId -> Tab object
+const activeDownloads = new Map(); // downloadId -> DownloadItem
 let activeTabId = null;
 let tabCounter = 0;
 let topBarHeight = 84; // Default topbar height (tabs + toolbar)
@@ -46,6 +51,81 @@ function sendToChromeAndDock(channel, payload) {
     contextMenuView.webContents.send(channel, payload);
   }
 }
+
+// electron-updater configuration & event forwarding
+autoUpdater.autoDownload = true;
+autoUpdater.logger = {
+  info: (msg) => console.log('[AutoUpdater]', msg),
+  warn: (msg) => console.warn('[AutoUpdater]', msg),
+  error: (msg) => console.error('[AutoUpdater]', msg)
+};
+
+function broadcastUpdaterEvent(data) {
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
+    mainWindow.webContents.send('updater-event', data);
+  }
+  if (modalsView && !modalsView.isDestroyed() && modalsView.webContents) {
+    modalsView.webContents.send('updater-event', data);
+  }
+  for (const tab of tabs.values()) {
+    if (tab.view && tab.view.webContents && !tab.view.webContents.isDestroyed()) {
+      tab.view.webContents.send('updater-event', data);
+    }
+  }
+}
+
+autoUpdater.on('checking-for-update', () => {
+  broadcastUpdaterEvent({
+    event: 'checking-for-update',
+    status: 'checking'
+  });
+});
+
+autoUpdater.on('update-available', (info) => {
+  broadcastUpdaterEvent({
+    event: 'update-available',
+    status: 'available',
+    info,
+    version: info && info.version
+  });
+});
+
+autoUpdater.on('update-not-available', (info) => {
+  broadcastUpdaterEvent({
+    event: 'update-not-available',
+    status: 'not-available',
+    info,
+    version: info && info.version
+  });
+});
+
+autoUpdater.on('download-progress', (progressObj) => {
+  broadcastUpdaterEvent({
+    event: 'download-progress',
+    status: 'downloading',
+    percent: Math.round((progressObj && progressObj.percent) || 0),
+    transferred: progressObj && progressObj.transferred,
+    total: progressObj && progressObj.total,
+    bytesPerSecond: progressObj && progressObj.bytesPerSecond
+  });
+});
+
+autoUpdater.on('update-downloaded', (info) => {
+  broadcastUpdaterEvent({
+    event: 'update-downloaded',
+    status: 'downloaded',
+    info,
+    version: info && info.version
+  });
+});
+
+autoUpdater.on('error', (err) => {
+  broadcastUpdaterEvent({
+    event: 'error',
+    status: 'error',
+    message: err && err.message ? err.message : String(err)
+  });
+});
 
 function updateModalsViewBounds() {
   if (!mainWindow || mainWindow.isDestroyed() || !modalsView) return;
@@ -97,6 +177,10 @@ function formatNavigationUrl(input) {
   const trimmed = (input || '').trim();
   if (!trimmed) return 'oni://newtab';
   if (trimmed.startsWith('oni://')) return trimmed;
+  // Handle Disney login bridge URLs to properly route to Disney+ login
+  if (/^https?:\/\/login\.disney\.com\/.*DTCI-DISNEYPLUS\.WEB.*\/bridge\/web/i.test(trimmed)) {
+    return 'https://www.disneyplus.com/login';
+  }
   if (/^https?:\/\//i.test(trimmed) || /^file:\/\//i.test(trimmed) || trimmed === 'about:blank') {
     return trimmed;
   }
@@ -113,6 +197,10 @@ function formatNavigationUrl(input) {
 function loadTabUrl(tab, url, options = {}) {
   if (url === 'oni://newtab?mode=classic') {
     url = 'oni://newtab';
+  }
+  // Route Disney login bridge endpoint to real login portal
+  if (/^https?:\/\/login\.disney\.com\/.*DTCI-DISNEYPLUS\.WEB.*\/bridge\/web/i.test(url)) {
+    url = 'https://www.disneyplus.com/login';
   }
   tab.url = url;
   if (url === 'oni://home') {
@@ -208,9 +296,248 @@ function goForward(wc) {
   else wc.goForward();
 }
 
+function triggerOsActionDirect(action) {
+  hideContextMenuView();
+  const actionType = (action && typeof action === 'object') ? action.type : action;
+  if (actionType === 'downloads') {
+    hideToastView();
+  }
+  if (actionType === 'home') {
+    getOrCreateOniOsHomeTab(true);
+    if (dockView && dockView.webContents && !dockView.webContents.isDestroyed()) {
+      dockView.webContents.send('os:action', 'close-start-menu');
+    }
+    return;
+  }
+
+  // Route popup modals to independent modalsView
+  if (['search', 'spotlight', 'history', 'downloads', 'settings', 'pin-app', 'add-app', 'edit-app', 'close-modals'].includes(actionType)) {
+    if (modalsView && modalsView.webContents && !modalsView.webContents.isDestroyed()) {
+      modalsView.webContents.focus();
+      modalsView.webContents.send('os:action', action);
+    }
+    return;
+  }
+
+  if (dockView && dockView.webContents && !dockView.webContents.isDestroyed()) {
+    dockView.webContents.focus();
+    dockView.webContents.send('os:action', action);
+  }
+}
+
+function setupShortcutsForWebContents(wc) {
+  if (!wc || wc.isDestroyed()) return;
+  wc.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown') return;
+
+    const isCtrlOrCmd = input.control || input.meta;
+    const key = (input.key || '').toLowerCase();
+
+    // Ctrl+W: Close active tab (NEVER close whole browser window!)
+    if (isCtrlOrCmd && key === 'w') {
+      event.preventDefault();
+      if (activeTabId) {
+        closeTab(activeTabId);
+      }
+      return;
+    }
+
+    // Ctrl+T: New Tab
+    if (isCtrlOrCmd && key === 't' && !input.shift) {
+      event.preventDefault();
+      createTab('oni://newtab');
+      return;
+    }
+
+    // Ctrl+R / F5: Reload active tab
+    if ((isCtrlOrCmd && key === 'r') || input.key === 'F5') {
+      event.preventDefault();
+      if (activeTabId && tabs.has(activeTabId)) {
+        const currentTab = tabs.get(activeTabId);
+        if (currentTab.url.startsWith('oni://')) {
+          loadTabUrl(currentTab, currentTab.url);
+        } else {
+          currentTab.view.webContents.reload();
+        }
+      }
+      return;
+    }
+
+    // Ctrl+L: Focus omnibox in mainWindow
+    if (isCtrlOrCmd && key === 'l') {
+      event.preventDefault();
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('shortcut:focusOmnibox');
+      }
+      return;
+    }
+
+    // Ctrl+F: Find in page
+    if (isCtrlOrCmd && key === 'f') {
+      event.preventDefault();
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('shortcut:toggleFind');
+      }
+      return;
+    }
+
+    // Ctrl+D: Bookmark / Pin
+    if (isCtrlOrCmd && key === 'd') {
+      event.preventDefault();
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('shortcut:toggleBookmark');
+      }
+      return;
+    }
+
+    // Ctrl+H: Browsing History
+    if (isCtrlOrCmd && key === 'h') {
+      event.preventDefault();
+      if (isOniOsThemeActive()) {
+        triggerOsActionDirect('history');
+      } else if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('shortcut:openHistory');
+      }
+      return;
+    }
+
+    // Ctrl+J: Downloads
+    if (isCtrlOrCmd && key === 'j') {
+      event.preventDefault();
+      if (isOniOsThemeActive()) {
+        triggerOsActionDirect('downloads');
+      } else if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('shortcut:openDownloads');
+      }
+      return;
+    }
+
+    // Ctrl+K: Search / Spotlight
+    if (isCtrlOrCmd && key === 'k') {
+      event.preventDefault();
+      triggerOsActionDirect('search');
+      return;
+    }
+
+    // Ctrl+B: Bookmarks / Pinned Apps
+    if (isCtrlOrCmd && key === 'b') {
+      event.preventDefault();
+      if (isOniOsThemeActive()) {
+        triggerOsActionDirect('pin-app');
+      } else if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('shortcut:openBookmarks');
+      }
+      return;
+    }
+
+    // Ctrl+,: Settings
+    if (isCtrlOrCmd && input.key === ',') {
+      event.preventDefault();
+      if (isOniOsThemeActive()) {
+        triggerOsActionDirect('settings');
+      } else if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('shortcut:openSettings');
+      }
+      return;
+    }
+
+    // Zoom: Ctrl + + / Ctrl + =
+    if (isCtrlOrCmd && (input.key === '=' || input.key === '+')) {
+      event.preventDefault();
+      if (activeTabId && tabs.has(activeTabId)) {
+        const tab = tabs.get(activeTabId);
+        const next = Math.min(3.0, tab.view.webContents.getZoomFactor() + 0.1);
+        tab.view.webContents.setZoomFactor(next);
+        tab.zoomFactor = next;
+        notifyTabUpdated(tab);
+      }
+      return;
+    }
+    // Zoom: Ctrl + -
+    if (isCtrlOrCmd && input.key === '-') {
+      event.preventDefault();
+      if (activeTabId && tabs.has(activeTabId)) {
+        const tab = tabs.get(activeTabId);
+        const next = Math.max(0.25, tab.view.webContents.getZoomFactor() - 0.1);
+        tab.view.webContents.setZoomFactor(next);
+        tab.zoomFactor = next;
+        notifyTabUpdated(tab);
+      }
+      return;
+    }
+    // Zoom: Ctrl + 0
+    if (isCtrlOrCmd && input.key === '0') {
+      event.preventDefault();
+      if (activeTabId && tabs.has(activeTabId)) {
+        const tab = tabs.get(activeTabId);
+        tab.view.webContents.setZoomFactor(1.0);
+        tab.zoomFactor = 1.0;
+        notifyTabUpdated(tab);
+      }
+      return;
+    }
+
+    // F12: DevTools
+    if (input.key === 'F12') {
+      event.preventDefault();
+      if (activeTabId && tabs.has(activeTabId)) {
+        const tab = tabs.get(activeTabId);
+        if (tab.view.webContents.isDevToolsOpened()) {
+          tab.view.webContents.closeDevTools();
+        } else {
+          tab.view.webContents.openDevTools({ mode: 'detach' });
+        }
+      }
+      return;
+    }
+
+    // Escape: Close flyouts / modals / find bar
+    if (input.key === 'Escape') {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('shortcut:escape');
+      }
+      triggerOsActionDirect('close-modals');
+      if (dockView && dockView.webContents && !dockView.webContents.isDestroyed()) {
+        dockView.webContents.send('os:action', 'close-start-menu');
+      }
+      return;
+    }
+
+    // Ctrl+Tab / Ctrl+Shift+Tab: Tab cycling
+    if (isCtrlOrCmd && input.key === 'Tab') {
+      event.preventDefault();
+      const allTabs = Array.from(tabs.values()).filter(t => !t.isDesktopHome && t.url !== 'oni://home');
+      if (allTabs.length > 1) {
+        const curIdx = allTabs.findIndex(t => t.id === activeTabId);
+        const delta = input.shift ? -1 : 1;
+        const nextIdx = (curIdx + delta + allTabs.length) % allTabs.length;
+        switchTab(allTabs[nextIdx].id);
+      }
+      return;
+    }
+
+    // Ctrl+1 .. Ctrl+9: Switch to tab by index
+    if (isCtrlOrCmd && input.key >= '1' && input.key <= '9') {
+      event.preventDefault();
+      const num = parseInt(input.key, 10);
+      const allTabs = Array.from(tabs.values()).filter(t => !t.isDesktopHome && t.url !== 'oni://home');
+      if (num === 9 && allTabs.length > 0) {
+        switchTab(allTabs[allTabs.length - 1].id);
+      } else if (allTabs[num - 1]) {
+        switchTab(allTabs[num - 1].id);
+      }
+      return;
+    }
+  });
+}
+
 function createTab(initialUrl = 'oni://newtab', options = {}) {
   if (initialUrl === 'oni://newtab?mode=classic') {
     initialUrl = 'oni://newtab';
+  }
+  // Route Disney login bridge URLs to Disney+ login
+  if (/^https?:\/\/login\.disney\.com\/.*DTCI-DISNEYPLUS\.WEB.*\/bridge\/web/i.test(initialUrl)) {
+    initialUrl = 'https://www.disneyplus.com/login';
   }
   const switchToTab = options.switchToTab !== false;
   tabCounter++;
@@ -221,7 +548,7 @@ function createTab(initialUrl = 'oni://newtab', options = {}) {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true,
+      sandbox: false,
       spellcheck: true
     }
   });
@@ -244,6 +571,9 @@ function createTab(initialUrl = 'oni://newtab', options = {}) {
 
   const wc = view.webContents;
 
+  // Intercept keyboard shortcuts on tab webContents (Fix: Ctrl+W closing window, global shortcuts)
+  setupShortcutsForWebContents(wc);
+
   // WebContents event bindings
   wc.on('did-start-loading', () => {
     hideContextMenuView();
@@ -256,6 +586,18 @@ function createTab(initialUrl = 'oni://newtab', options = {}) {
     tab.canGoBack = canGoBack(wc);
     tab.canGoForward = canGoForward(wc);
     notifyTabUpdated(tab);
+  });
+
+  wc.on('did-fail-load', (event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    if (isMainFrame) {
+      tab.isLoading = false;
+      if (errorCode !== -3) { // Not ERR_ABORTED
+        if (tab.title === 'Loading...') {
+          tab.title = validatedURL || 'Failed to load';
+        }
+      }
+      notifyTabUpdated(tab);
+    }
   });
 
   wc.on('page-title-updated', (event, title) => {
@@ -523,6 +865,33 @@ function notifyTabUpdated(tab) {
   sendToChromeAndDock('tab:updated', sanitizeTab(tab));
 }
 
+function reorderTabs(orderedTabIds) {
+  if (!Array.isArray(orderedTabIds)) return;
+  const newMap = new Map();
+  // Preserve persistent home tab if present and not explicitly ordered
+  for (const [id, tab] of tabs.entries()) {
+    if (tab.url === 'oni://home' && !orderedTabIds.includes(id)) {
+      newMap.set(id, tab);
+    }
+  }
+  for (const id of orderedTabIds) {
+    if (tabs.has(id)) {
+      newMap.set(id, tabs.get(id));
+    }
+  }
+  for (const [id, tab] of tabs.entries()) {
+    if (!newMap.has(id)) {
+      newMap.set(id, tab);
+    }
+  }
+  tabs.clear();
+  for (const [id, tab] of newMap.entries()) {
+    tabs.set(id, tab);
+  }
+  const sanitized = Array.from(tabs.values()).map(sanitizeTab);
+  sendToChromeAndDock('tabs:reordered', sanitized);
+}
+
 function setupDownloads() {
   const sess = session.defaultSession;
   try {
@@ -558,6 +927,7 @@ function setupDownloads() {
     }
 
     const downloadId = 'dl_' + Date.now();
+    activeDownloads.set(downloadId, item);
     const downloadItem = {
       id: downloadId,
       filename: baseFilename,
@@ -582,6 +952,7 @@ function setupDownloads() {
     });
 
     item.once('done', (e, state) => {
+      activeDownloads.delete(downloadId);
       downloadItem.state = state;
       downloadItem.path = item.getSavePath() || downloadItem.path;
       if (downloadItem.path) {
@@ -642,6 +1013,7 @@ function createModalsView() {
     // ignore
   }
   mainWindow.contentView.addChildView(modalsView);
+  setupShortcutsForWebContents(modalsView.webContents);
   modalsView.webContents.loadFile(path.join(__dirname, '../renderer/modals.html'));
   modalsView.setVisible(false);
   modalsView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
@@ -759,6 +1131,7 @@ function createDockView() {
     // ignore
   }
   mainWindow.contentView.addChildView(dockView);
+  setupShortcutsForWebContents(dockView.webContents);
   dockView.webContents.loadFile(path.join(__dirname, '../renderer/dock.html'));
   updateDockViewBounds();
 }
@@ -810,7 +1183,11 @@ function createWindow() {
   createContextMenuView();
 
   // Load the browser chrome UI
+  setupShortcutsForWebContents(mainWindow.webContents);
   mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
+
+  // Maximized by default on launch
+  mainWindow.maximize();
 
   // Window resize handler
   mainWindow.on('resize', () => {
@@ -850,7 +1227,38 @@ function createWindow() {
 
 // App lifecycle
 app.whenReady().then(() => {
+  try {
+    const chromeVer = process.versions.chrome || '132.0.0.0';
+    const desktopChromeUa = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVer} Safari/537.36`;
+    session.defaultSession.setUserAgent(desktopChromeUa);
+
+    // Sanitize request headers so Cloudflare and modern sites receive authentic Google Chrome Client Hints
+    const chromeMajor = chromeVer.split('.')[0];
+    const standardSecChUa = `"Not A(Brand";v="8", "Chromium";v="${chromeMajor}", "Google Chrome";v="${chromeMajor}"`;
+    session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
+      const requestHeaders = details.requestHeaders || {};
+      for (const key of Object.keys(requestHeaders)) {
+        const lowerKey = key.toLowerCase();
+        if (lowerKey === 'sec-ch-ua') {
+          requestHeaders[key] = standardSecChUa;
+        } else if (lowerKey === 'user-agent') {
+          requestHeaders[key] = desktopChromeUa;
+        }
+      }
+      callback({ requestHeaders });
+    });
+  } catch (e) {}
+
   createWindow();
+
+  // On app startup, trigger a silent autoUpdater.checkForUpdatesAndNotify()
+  try {
+    autoUpdater.checkForUpdatesAndNotify().catch((err) => {
+      console.warn('[AutoUpdater] Startup update check failed:', err.message);
+    });
+  } catch (err) {
+    console.warn('[AutoUpdater] Startup update check exception:', err.message);
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -866,6 +1274,10 @@ app.on('window-all-closed', () => {
 });
 
 // IPC Handlers
+ipcMain.handle('check-for-updates', () => autoUpdater.checkForUpdates());
+ipcMain.handle('install-update', () => autoUpdater.quitAndInstall());
+ipcMain.handle('get-app-version', () => app.getVersion());
+
 ipcMain.handle('window:minimize', () => {
   if (mainWindow) mainWindow.minimize();
 });
@@ -900,6 +1312,10 @@ ipcMain.handle('tab:close', (event, id) => {
 
 ipcMain.handle('tab:switch', (event, id) => {
   switchTab(id);
+});
+
+ipcMain.handle('tab:reorder', (event, orderedTabIds) => {
+  reorderTabs(orderedTabIds);
 });
 
 ipcMain.handle('tab:reload', (event, id) => {
@@ -938,6 +1354,10 @@ ipcMain.handle('tab:navigate', (event, { url, id }) => {
   const targetId = id || activeTabId;
   if (targetId && tabs.has(targetId)) {
     const tab = tabs.get(targetId);
+    if (tab.url === 'oni://home' && url !== 'oni://home') {
+      createTab(url);
+      return;
+    }
     const destUrl = formatNavigationUrl(url);
     loadTabUrl(tab, destUrl);
   }
@@ -1154,6 +1574,17 @@ ipcMain.handle('privacy:clearData', async (event, options = {}) => {
 // Downloads IPC
 ipcMain.handle('downloads:get', () => store.getDownloads());
 ipcMain.handle('downloads:clear', () => store.clearDownloads());
+ipcMain.handle('downloads:cancel', (event, id) => {
+  if (id && activeDownloads.has(id)) {
+    const item = activeDownloads.get(id);
+    try {
+      item.cancel();
+      activeDownloads.delete(id);
+      return true;
+    } catch (e) {}
+  }
+  return false;
+});
 ipcMain.handle('downloads:openFile', (event, filePath) => {
   if (filePath) shell.openPath(filePath);
 });
@@ -1367,32 +1798,7 @@ ipcMain.handle('ui:getDockVisibility', () => {
 });
 
 ipcMain.handle('os:triggerAction', (event, action) => {
-  hideContextMenuView();
-  const actionType = (action && typeof action === 'object') ? action.type : action;
-  if (actionType === 'downloads') {
-    hideToastView();
-  }
-  if (actionType === 'home') {
-    getOrCreateOniOsHomeTab(true);
-    if (dockView && dockView.webContents && !dockView.webContents.isDestroyed()) {
-      dockView.webContents.send('os:action', 'close-start-menu');
-    }
-    return;
-  }
-
-  // Route popup modals to independent modalsView
-  if (['search', 'spotlight', 'history', 'downloads', 'settings', 'pin-app', 'add-app', 'edit-app', 'close-modals'].includes(actionType)) {
-    if (modalsView && modalsView.webContents && !modalsView.webContents.isDestroyed()) {
-      modalsView.webContents.focus();
-      modalsView.webContents.send('os:action', action);
-    }
-    return;
-  }
-
-  if (dockView && dockView.webContents && !dockView.webContents.isDestroyed()) {
-    dockView.webContents.focus();
-    dockView.webContents.send('os:action', action);
-  }
+  triggerOsActionDirect(action);
 });
 
 ipcMain.handle('context:action', async (event, { action, params = {} }) => {

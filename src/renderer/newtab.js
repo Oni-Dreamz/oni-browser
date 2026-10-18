@@ -98,8 +98,17 @@
 
   const KANJI_DAYS = ['日曜日', '月曜日', '火曜日', '水曜日', '木曜日', '金曜日', '土曜日'];
 
+  function normalizeUrlForLaunch(url) {
+    if (!url) return url;
+    if (typeof url === 'string' && /login\.disney\.com\/.*DTCI-DISNEYPLUS\.WEB.*\/bridge\/web/i.test(url)) {
+      return 'https://www.disneyplus.com/login';
+    }
+    return url;
+  }
+
   function launchUrlFromDesktop(targetUrl) {
     if (!targetUrl) return;
+    targetUrl = normalizeUrlForLaunch(targetUrl);
     if (osStartMenu) osStartMenu.classList.add('hidden');
     closeOsWindow('os-win-spotlight');
     if (document.body.dataset.layout === 'desktop' && window.oniAPI && window.oniAPI.createTab) {
@@ -1055,13 +1064,22 @@
     osSpotlightResults.appendChild(searchItem);
   }
 
+  let currentWindowZ = 50;
+
+  function bringWindowToFront(winEl) {
+    if (!winEl) return;
+    currentWindowZ++;
+    winEl.style.zIndex = String(currentWindowZ);
+    document.querySelectorAll('.os-window').forEach(w => w.classList.remove('focused'));
+    winEl.classList.add('focused');
+  }
+
   async function openOsWindow(winId) {
     const winEl = document.getElementById(winId);
     if (!winEl) return;
 
     // Bring to front
-    document.querySelectorAll('.os-window').forEach(w => { w.style.zIndex = '30'; });
-    winEl.style.zIndex = '35';
+    bringWindowToFront(winEl);
     winEl.classList.remove('hidden');
 
     // Update dock active dot
@@ -1198,11 +1216,14 @@
 
         html += `
           <div class="os-dl-active-card">
-            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-bottom:4px;">
-              <div style="font-weight:600; color:#fff; font-size:12.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:380px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:4px;">
+              <div style="font-weight:600; color:#fff; font-size:12.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:350px;">
                 ${item.filename || 'Downloading file...'}
               </div>
-              <span class="os-dl-badge-pill progressing">${pct}%</span>
+              <div style="display:flex; align-items:center; gap:6px;">
+                <span class="os-dl-badge-pill progressing">${pct}%</span>
+                <button type="button" class="os-btn-ghost os-newtab-dl-cancel" data-id="${item.id}" title="Cancel download" style="padding:2px 7px; font-size:11px; line-height:1; color:#ef4444; border-color:rgba(239,68,68,0.3); border-radius:4px; font-weight:700;">✕</button>
+              </div>
             </div>
             <div class="os-dl-progress-bar">
               <div class="os-dl-progress-fill" style="width: ${pct}%;"></div>
@@ -1289,6 +1310,19 @@
       });
     }
 
+    body.querySelectorAll('.os-newtab-dl-cancel').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const id = btn.dataset.id;
+        if (id && window.oniAPI && window.oniAPI.cancelDownload) {
+          btn.disabled = true;
+          btn.textContent = '...';
+          await window.oniAPI.cancelDownload(id);
+          renderOsDownloadsWindow();
+        }
+      });
+    });
+
     body.querySelectorAll('.os-dl-action-open').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -1312,16 +1346,240 @@
 
   let activeSettingsSection = 'general';
 
+  // System Updates State
+  let appVersion = '1.0.0';
+  let updateState = {
+    status: 'idle', // 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'error'
+    percent: 0,
+    downloadedVersion: '',
+    errorMessage: '',
+    checkedOnce: false
+  };
+
+  function getUpdaterApi() {
+    return (window.electronAPI && window.electronAPI.updater) || (window.oniAPI && window.oniAPI.updater);
+  }
+
+  function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  function renderUpdateStatusIndicator(state) {
+    if (state.status === 'checking') {
+      return `
+        <div class="os-update-status-checking">
+          <span class="os-update-spinner"></span>
+          <span>Scanning For Updates...</span>
+        </div>
+      `;
+    }
+    if (state.status === 'available' || state.status === 'downloading') {
+      const pct = Math.max(0, Math.min(100, state.percent || 0));
+      return `
+        <div class="os-update-progress-wrap">
+          <div class="os-update-progress-label">
+            <span>Downloading update: ${pct}%</span>
+            <span>${pct}%</span>
+          </div>
+          <div class="os-update-progress-bar-bg">
+            <div class="os-update-progress-bar-fill" style="width: ${pct}%;"></div>
+          </div>
+        </div>
+      `;
+    }
+    if (state.status === 'downloaded') {
+      return `
+        <div class="os-update-status-ready">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+          <span>v${escapeHtml(state.downloadedVersion || 'new version')} ready to install</span>
+        </div>
+      `;
+    }
+    if (state.status === 'error') {
+      return `
+        <div class="os-update-status-error">
+          <span class="os-update-error-msg" title="${escapeHtml(state.errorMessage)}">${escapeHtml(state.errorMessage || 'Failed to check for updates')}</span>
+          <button type="button" class="os-update-retry-btn" id="os-update-retry-btn">[ Retry ]</button>
+        </div>
+      `;
+    }
+    // Idle state
+    if (state.checkedOnce) {
+      return `
+        <div class="os-update-status-uptodate">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+          <span>Up to date</span>
+        </div>
+      `;
+    }
+    return '';
+  }
+
+  function renderUpdateCardHtml() {
+    return `
+      <div class="os-update-card" id="os-update-card">
+        <div class="os-update-header">
+          <div class="os-update-titles">
+            <div class="os-settings-group-label" style="margin-bottom: 2px; color: var(--accent-green);">SYSTEM UPDATES</div>
+            <div class="os-update-version-subtitle" id="os-update-version">Current Version: v${escapeHtml(appVersion)}</div>
+          </div>
+          <button type="button" class="os-update-btn ${updateState.status === 'downloaded' ? 'install-ready' : ''}" id="os-update-action-btn" ${updateState.status === 'checking' ? 'disabled' : ''}>
+            ${updateState.status === 'downloaded' ? '[ Restart & Install ]' : (updateState.status === 'checking' ? '[ Checking... ]' : '[ Check for Updates ]')}
+          </button>
+        </div>
+        <div class="os-update-status-row" id="os-update-status-row">
+          ${renderUpdateStatusIndicator(updateState)}
+        </div>
+      </div>
+    `;
+  }
+
+  function updateDomUpdateCard(container) {
+    if (!container) return;
+    const actionBtn = container.querySelector('#os-update-action-btn');
+    const statusRow = container.querySelector('#os-update-status-row');
+    const verEl = container.querySelector('#os-update-version');
+
+    if (verEl) {
+      verEl.textContent = `Current Version: v${appVersion}`;
+    }
+
+    if (actionBtn) {
+      if (updateState.status === 'downloaded') {
+        actionBtn.textContent = '[ Restart & Install ]';
+        actionBtn.classList.add('install-ready');
+        actionBtn.disabled = false;
+      } else if (updateState.status === 'checking') {
+        actionBtn.textContent = '[ Checking... ]';
+        actionBtn.classList.remove('install-ready');
+        actionBtn.disabled = true;
+      } else {
+        actionBtn.textContent = '[ Check for Updates ]';
+        actionBtn.classList.remove('install-ready');
+        actionBtn.disabled = false;
+      }
+    }
+
+    if (statusRow) {
+      statusRow.innerHTML = renderUpdateStatusIndicator(updateState);
+      const retryBtn = statusRow.querySelector('#os-update-retry-btn');
+      if (retryBtn) {
+        retryBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          triggerUpdateCheck(container);
+        });
+      }
+    }
+  }
+
+  async function triggerUpdateCheck(container) {
+    const updater = getUpdaterApi();
+    if (!updater) return;
+    updateState.status = 'checking';
+    updateState.errorMessage = '';
+    updateDomUpdateCard(container);
+
+    try {
+      if (updater.checkForUpdates) {
+        await updater.checkForUpdates();
+      }
+    } catch (err) {
+      updateState.status = 'error';
+      updateState.errorMessage = err?.message || 'Failed to check for updates';
+      updateDomUpdateCard(container);
+    }
+  }
+
+  function bindUpdateCardEvents(container) {
+    if (!container) return;
+    const actionBtn = container.querySelector('#os-update-action-btn');
+    const retryBtn = container.querySelector('#os-update-retry-btn');
+
+    if (actionBtn) {
+      actionBtn.addEventListener('click', async () => {
+        const updater = getUpdaterApi();
+        if (updateState.status === 'downloaded') {
+          if (updater && updater.installUpdate) {
+            updater.installUpdate();
+          }
+        } else {
+          await triggerUpdateCheck(container);
+        }
+      });
+    }
+
+    if (retryBtn) {
+      retryBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        triggerUpdateCheck(container);
+      });
+    }
+  }
+
+  // Register updater event listener once
+  const updaterApiInstance = getUpdaterApi();
+  if (updaterApiInstance && updaterApiInstance.onUpdaterEvent) {
+    updaterApiInstance.onUpdaterEvent((data) => {
+      if (!data) return;
+      const evt = data.event || data.status;
+      if (evt === 'checking-for-update' || data.status === 'checking') {
+        updateState.status = 'checking';
+        updateState.errorMessage = '';
+      } else if (evt === 'update-available' || data.status === 'available') {
+        updateState.status = 'downloading';
+        updateState.percent = 0;
+        updateState.errorMessage = '';
+      } else if (evt === 'update-not-available' || data.status === 'not-available') {
+        updateState.status = 'idle';
+        updateState.checkedOnce = true;
+        updateState.errorMessage = '';
+      } else if (evt === 'download-progress' || data.status === 'downloading') {
+        updateState.status = 'downloading';
+        updateState.percent = data.percent || 0;
+        updateState.errorMessage = '';
+      } else if (evt === 'update-downloaded' || data.status === 'downloaded') {
+        updateState.status = 'downloaded';
+        updateState.downloadedVersion = data.version || (data.info && data.info.version) || '';
+        updateState.errorMessage = '';
+      } else if (evt === 'error' || data.status === 'error') {
+        updateState.status = 'error';
+        updateState.errorMessage = data.message || 'Error checking for updates';
+      }
+      const b = document.getElementById('os-win-settings-body');
+      if (b) updateDomUpdateCard(b);
+    });
+  }
+
+  if (updaterApiInstance && updaterApiInstance.getVersion) {
+    updaterApiInstance.getVersion().then(v => {
+      if (v) {
+        appVersion = v;
+        const verEl = document.getElementById('os-update-version');
+        if (verEl) verEl.textContent = `Current Version: v${escapeHtml(appVersion)}`;
+      }
+    }).catch(() => {});
+  }
+
   async function renderOsSettingsWindow() {
     const body = document.getElementById('os-win-settings-body');
     if (!body || !window.oniAPI) return;
-    const [themes, activeTheme, settings, shieldStats, accentColors] = await Promise.all([
+    const updater = getUpdaterApi();
+    const [themes, activeTheme, settings, shieldStats, accentColors, fetchedVersion] = await Promise.all([
       window.oniAPI.getThemes(),
       window.oniAPI.getActiveTheme(),
       window.oniAPI.getSettings ? window.oniAPI.getSettings() : { searchEngine: 'google' },
       window.oniAPI.getShieldStats ? window.oniAPI.getShieldStats() : { enabled: true, totalBlocked: 0 },
-      window.oniAPI.getAccentColors ? window.oniAPI.getAccentColors() : []
+      window.oniAPI.getAccentColors ? window.oniAPI.getAccentColors() : [],
+      (updater && updater.getVersion) ? updater.getVersion().catch(() => null) : null
     ]);
+
+    if (fetchedVersion) appVersion = fetchedVersion;
 
     const currentEngineKey = (settings && settings.searchEngine) || 'google';
     const foundEngIdx = ENGINES.findIndex(e => e.key === currentEngineKey);
@@ -1417,19 +1675,19 @@
     const widgetDefs = [
       {
         id: 'clock',
-        title: 'System Time // Tokyo-STD',
+        title: 'System Time',
         desc: 'Live digital clock, Kanji date telemetry, and active session status',
         enabled: !widgetsCfg.clock || widgetsCfg.clock.enabled !== false
       },
       {
         id: 'search',
-        title: 'Quick Command // Web & Apps',
+        title: 'Quick Command',
         desc: 'Desktop quick search bar with instant search engine switcher',
         enabled: !widgetsCfg.search || widgetsCfg.search.enabled !== false
       },
       {
         id: 'shield',
-        title: 'Oni Shield // Firewall',
+        title: 'Oni Shield',
         desc: 'Real-time tracker neutralization and Chromium kernel telemetry',
         enabled: !widgetsCfg.shield || widgetsCfg.shield.enabled !== false
       }
@@ -1492,6 +1750,10 @@
               <div class="os-settings-section-title">General</div>
               <div class="os-settings-section-desc">Configure default search engine and browsing preferences.</div>
             </div>
+
+            <!-- Updates Card -->
+            ${renderUpdateCardHtml()}
+
             <div>
               <div class="os-settings-group-label">Search Engine</div>
               <div style="display:flex; gap:8px;">
@@ -1569,6 +1831,8 @@
         </div>
       </div>
     `;
+
+    bindUpdateCardEvents(body);
 
     body.querySelectorAll('.os-settings-nav-item').forEach(navBtn => {
       navBtn.addEventListener('click', () => {
@@ -1838,6 +2102,14 @@
       });
     });
 
+    // Bring modal to front when clicking anywhere on it (capture phase guarantees precedence)
+    document.addEventListener('pointerdown', (e) => {
+      const modalWin = e.target.closest('.os-window:not(.hidden)');
+      if (modalWin && !e.target.closest('.os-window-controls, [data-close-window]')) {
+        bringWindowToFront(modalWin);
+      }
+    }, true);
+
     // Draggable Floating OS Windows
     document.querySelectorAll('[data-drag-window]').forEach(titlebar => {
       let isDragging = false;
@@ -1850,8 +2122,7 @@
       titlebar.addEventListener('mousedown', (e) => {
         if (e.target.closest('button')) return;
         isDragging = true;
-        document.querySelectorAll('.os-window').forEach(w => { w.style.zIndex = '30'; });
-        winEl.style.zIndex = '36';
+        bringWindowToFront(winEl);
 
         const rect = winEl.getBoundingClientRect();
         winEl.style.transform = 'none';

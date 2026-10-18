@@ -151,6 +151,47 @@
       });
     }
 
+    if (window.oniAPI.onTabsReordered) {
+      window.oniAPI.onTabsReordered((newList) => {
+        if (Array.isArray(newList)) {
+          tabs = newList;
+          renderTabs();
+        }
+      });
+    }
+
+    if (window.oniAPI.onShortcut) {
+      window.oniAPI.onShortcut('focusOmnibox', () => {
+        omniboxInput.focus();
+        omniboxInput.select();
+      });
+      window.oniAPI.onShortcut('toggleFind', () => {
+        toggleFindBar();
+      });
+      window.oniAPI.onShortcut('toggleBookmark', () => {
+        btnStar.click();
+      });
+      window.oniAPI.onShortcut('openHistory', () => {
+        openOverlay('history');
+      });
+      window.oniAPI.onShortcut('openDownloads', () => {
+        downloadsFlyout.classList.toggle('hidden');
+        if (!downloadsFlyout.classList.contains('hidden')) renderDownloadsFlyout();
+      });
+      window.oniAPI.onShortcut('openBookmarks', () => {
+        openOverlay('bookmarks');
+      });
+      window.oniAPI.onShortcut('openSettings', () => {
+        openOverlay('settings');
+      });
+      window.oniAPI.onShortcut('escape', () => {
+        if (!findBar.classList.contains('hidden')) closeFindBar();
+        if (!shieldFlyout.classList.contains('hidden')) shieldFlyout.classList.add('hidden');
+        if (!downloadsFlyout.classList.contains('hidden')) downloadsFlyout.classList.add('hidden');
+        if (!overlayContainer.classList.contains('hidden')) closeOverlay();
+      });
+    }
+
     // Sync any already-created tabs
     const initialTabs = await window.oniAPI.getTabs();
     if (Array.isArray(initialTabs) && initialTabs.length > 0) {
@@ -680,7 +721,22 @@
       meta.textContent = dl.state === 'completed' ? 'Completed' : `${pct}% (${(dl.receivedBytes / (1024*1024)).toFixed(1)} MB)`;
       info.appendChild(meta);
 
-      row.appendChild(info);
+      if (dl.state === 'progressing') {
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'text-btn';
+        cancelBtn.textContent = '✕';
+        cancelBtn.title = 'Cancel Download';
+        cancelBtn.style.color = '#ef4444';
+        cancelBtn.style.marginLeft = '4px';
+        cancelBtn.addEventListener('click', async () => {
+          if (window.oniAPI && window.oniAPI.cancelDownload) {
+            cancelBtn.disabled = true;
+            await window.oniAPI.cancelDownload(dl.id);
+            renderDownloadsFlyout();
+          }
+        });
+        row.appendChild(cancelBtn);
+      }
 
       const openBtn = document.createElement('button');
       openBtn.className = 'text-btn';
@@ -825,14 +881,235 @@
   modalClose.addEventListener('click', closeOverlay);
   overlayBackdrop.addEventListener('click', closeOverlay);
 
+  // System Updates State
+  let appVersion = '1.0.0';
+  let updateState = {
+    status: 'idle',
+    percent: 0,
+    downloadedVersion: '',
+    errorMessage: '',
+    checkedOnce: false
+  };
+
+  function getUpdaterApi() {
+    return (window.electronAPI && window.electronAPI.updater) || (window.oniAPI && window.oniAPI.updater);
+  }
+
+  function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  function renderUpdateStatusIndicator(state) {
+    if (state.status === 'checking') {
+      return `
+        <div class="os-update-status-checking">
+          <span class="os-update-spinner"></span>
+          <span>Scanning For Updates...</span>
+        </div>
+      `;
+    }
+    if (state.status === 'available' || state.status === 'downloading') {
+      const pct = Math.max(0, Math.min(100, state.percent || 0));
+      return `
+        <div class="os-update-progress-wrap">
+          <div class="os-update-progress-label">
+            <span>Downloading update: ${pct}%</span>
+            <span>${pct}%</span>
+          </div>
+          <div class="os-update-progress-bar-bg">
+            <div class="os-update-progress-bar-fill" style="width: ${pct}%;"></div>
+          </div>
+        </div>
+      `;
+    }
+    if (state.status === 'downloaded') {
+      return `
+        <div class="os-update-status-ready">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+          <span>v${escapeHtml(state.downloadedVersion || 'new version')} ready to install</span>
+        </div>
+      `;
+    }
+    if (state.status === 'error') {
+      return `
+        <div class="os-update-status-error">
+          <span class="os-update-error-msg" title="${escapeHtml(state.errorMessage)}">${escapeHtml(state.errorMessage || 'Failed to check for updates')}</span>
+          <button type="button" class="os-update-retry-btn" id="os-update-retry-btn">[ Retry ]</button>
+        </div>
+      `;
+    }
+    if (state.checkedOnce) {
+      return `
+        <div class="os-update-status-uptodate">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+          <span>Up to date</span>
+        </div>
+      `;
+    }
+    return '';
+  }
+
+  function renderUpdateCardHtml() {
+    return `
+      <div class="os-update-card" id="os-update-card">
+        <div class="os-update-header">
+          <div class="os-update-titles">
+            <div class="os-settings-group-label" style="margin-bottom: 2px; color: var(--accent-green);">SYSTEM UPDATES</div>
+            <div class="os-update-version-subtitle" id="os-update-version">Current Version: v${escapeHtml(appVersion)}</div>
+          </div>
+          <button type="button" class="os-update-btn ${updateState.status === 'downloaded' ? 'install-ready' : ''}" id="os-update-action-btn" ${updateState.status === 'checking' ? 'disabled' : ''}>
+            ${updateState.status === 'downloaded' ? '[ Restart & Install ]' : (updateState.status === 'checking' ? '[ Checking... ]' : '[ Check for Updates ]')}
+          </button>
+        </div>
+        <div class="os-update-status-row" id="os-update-status-row">
+          ${renderUpdateStatusIndicator(updateState)}
+        </div>
+      </div>
+    `;
+  }
+
+  function updateDomUpdateCard(container) {
+    if (!container) return;
+    const actionBtn = container.querySelector('#os-update-action-btn');
+    const statusRow = container.querySelector('#os-update-status-row');
+    const verEl = container.querySelector('#os-update-version');
+
+    if (verEl) {
+      verEl.textContent = `Current Version: v${appVersion}`;
+    }
+
+    if (actionBtn) {
+      if (updateState.status === 'downloaded') {
+        actionBtn.textContent = '[ Restart & Install ]';
+        actionBtn.classList.add('install-ready');
+        actionBtn.disabled = false;
+      } else if (updateState.status === 'checking') {
+        actionBtn.textContent = '[ Checking... ]';
+        actionBtn.classList.remove('install-ready');
+        actionBtn.disabled = true;
+      } else {
+        actionBtn.textContent = '[ Check for Updates ]';
+        actionBtn.classList.remove('install-ready');
+        actionBtn.disabled = false;
+      }
+    }
+
+    if (statusRow) {
+      statusRow.innerHTML = renderUpdateStatusIndicator(updateState);
+      const retryBtn = statusRow.querySelector('#os-update-retry-btn');
+      if (retryBtn) {
+        retryBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          triggerUpdateCheck(container);
+        });
+      }
+    }
+  }
+
+  async function triggerUpdateCheck(container) {
+    const updater = getUpdaterApi();
+    if (!updater) return;
+    updateState.status = 'checking';
+    updateState.errorMessage = '';
+    updateDomUpdateCard(container);
+
+    try {
+      if (updater.checkForUpdates) {
+        await updater.checkForUpdates();
+      }
+    } catch (err) {
+      updateState.status = 'error';
+      updateState.errorMessage = err?.message || 'Failed to check for updates';
+      updateDomUpdateCard(container);
+    }
+  }
+
+  function bindUpdateCardEvents(container) {
+    if (!container) return;
+    const actionBtn = container.querySelector('#os-update-action-btn');
+    const retryBtn = container.querySelector('#os-update-retry-btn');
+
+    if (actionBtn) {
+      actionBtn.addEventListener('click', async () => {
+        const updater = getUpdaterApi();
+        if (updateState.status === 'downloaded') {
+          if (updater && updater.installUpdate) {
+            updater.installUpdate();
+          }
+        } else {
+          await triggerUpdateCheck(container);
+        }
+      });
+    }
+
+    if (retryBtn) {
+      retryBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        triggerUpdateCheck(container);
+      });
+    }
+  }
+
+  const updaterApiInstance = getUpdaterApi();
+  if (updaterApiInstance && updaterApiInstance.onUpdaterEvent) {
+    updaterApiInstance.onUpdaterEvent((data) => {
+      if (!data) return;
+      const evt = data.event || data.status;
+      if (evt === 'checking-for-update' || data.status === 'checking') {
+        updateState.status = 'checking';
+        updateState.errorMessage = '';
+      } else if (evt === 'update-available' || data.status === 'available') {
+        updateState.status = 'downloading';
+        updateState.percent = 0;
+        updateState.errorMessage = '';
+      } else if (evt === 'update-not-available' || data.status === 'not-available') {
+        updateState.status = 'idle';
+        updateState.checkedOnce = true;
+        updateState.errorMessage = '';
+      } else if (evt === 'download-progress' || data.status === 'downloading') {
+        updateState.status = 'downloading';
+        updateState.percent = data.percent || 0;
+        updateState.errorMessage = '';
+      } else if (evt === 'update-downloaded' || data.status === 'downloaded') {
+        updateState.status = 'downloaded';
+        updateState.downloadedVersion = data.version || (data.info && data.info.version) || '';
+        updateState.errorMessage = '';
+      } else if (evt === 'error' || data.status === 'error') {
+        updateState.status = 'error';
+        updateState.errorMessage = data.message || 'Error checking for updates';
+      }
+      updateDomUpdateCard(modalContent);
+    });
+  }
+
+  if (updaterApiInstance && updaterApiInstance.getVersion) {
+    updaterApiInstance.getVersion().then(v => {
+      if (v) {
+        appVersion = v;
+        const verEl = document.getElementById('os-update-version');
+        if (verEl) verEl.textContent = `Current Version: v${escapeHtml(appVersion)}`;
+      }
+    }).catch(() => {});
+  }
+
   // Settings Modal View
   async function renderSettingsModal() {
     modalTitle.textContent = 'Oni Browser Settings';
-    const [settings, themes, activeTheme] = await Promise.all([
+    const updater = getUpdaterApi();
+    const [settings, themes, activeTheme, fetchedVersion] = await Promise.all([
       window.oniAPI.getSettings(),
       window.oniAPI.getThemes(),
-      window.oniAPI.getActiveTheme()
+      window.oniAPI.getActiveTheme(),
+      (updater && updater.getVersion) ? updater.getVersion().catch(() => null) : null
     ]);
+
+    if (fetchedVersion) appVersion = fetchedVersion;
 
     const activeId = (activeTheme && activeTheme.id) || settings.activeThemeId || 'oni-os';
 
@@ -898,6 +1175,9 @@
         </div>
         <div id="modal-theme-status" class="theme-status-msg hidden"></div>
       </div>
+
+      <!-- Updates Card -->
+      ${renderUpdateCardHtml()}
 
       <div class="setting-group">
         <div class="setting-label">Default Search Engine</div>
@@ -966,6 +1246,8 @@
         <div class="setting-desc">Version 1.0.0 (Windows Standalone x64 Edition). Crafted for speed, aesthetics, and privacy.</div>
       </div>
     `;
+
+    bindUpdateCardEvents(modalContent);
 
     // Bind theme card clicks
     modalContent.querySelectorAll('.theme-card').forEach(card => {

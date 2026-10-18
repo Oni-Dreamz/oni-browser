@@ -1,7 +1,19 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webFrame } = require('electron');
 
 if (window.location.protocol === 'file:') {
+  const updaterAPI = {
+    checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
+    installUpdate: () => ipcRenderer.invoke('install-update'),
+    getVersion: () => ipcRenderer.invoke('get-app-version'),
+    onUpdaterEvent: (callback) => ipcRenderer.on('updater-event', (_event, value) => callback(value))
+  };
+
+  contextBridge.exposeInMainWorld('electronAPI', {
+    updater: updaterAPI
+  });
+
   contextBridge.exposeInMainWorld('oniAPI', {
+    updater: updaterAPI,
     // Window controls
     minimize: () => ipcRenderer.invoke('window:minimize'),
     maximize: () => ipcRenderer.invoke('window:maximize'),
@@ -23,6 +35,7 @@ if (window.location.protocol === 'file:') {
     toggleMute: (id) => ipcRenderer.invoke('tab:toggleMute', id),
     toggleDevTools: (id) => ipcRenderer.invoke('tab:toggleDevTools', id),
     getTabs: () => ipcRenderer.invoke('tab:getAll'),
+    reorderTabs: (orderedTabIds) => ipcRenderer.invoke('tab:reorder', orderedTabIds),
 
     // Find in page
     findInPage: (text, forward) => ipcRenderer.invoke('tab:findInPage', { text, forward }),
@@ -59,6 +72,7 @@ if (window.location.protocol === 'file:') {
     // Downloads
     getDownloads: () => ipcRenderer.invoke('downloads:get'),
     clearDownloads: () => ipcRenderer.invoke('downloads:clear'),
+    cancelDownload: (id) => ipcRenderer.invoke('downloads:cancel', id),
     openDownloadFile: (filePath) => ipcRenderer.invoke('downloads:openFile', filePath),
     openDownloadFolder: (filePath) => ipcRenderer.invoke('downloads:openFolder', filePath),
 
@@ -187,6 +201,82 @@ if (window.location.protocol === 'file:') {
       const handler = (event, isFullscreen) => callback(isFullscreen);
       ipcRenderer.on('window:htmlFullscreenChange', handler);
       return () => ipcRenderer.removeListener('window:htmlFullscreenChange', handler);
+    },
+    onTabsReordered: (callback) => {
+      const handler = (event, list) => callback(list);
+      ipcRenderer.on('tabs:reordered', handler);
+      return () => ipcRenderer.removeListener('tabs:reordered', handler);
+    },
+    onShortcut: (name, callback) => {
+      const handler = () => callback();
+      ipcRenderer.on('shortcut:' + name, handler);
+      return () => ipcRenderer.removeListener('shortcut:' + name, handler);
     }
   });
+} else {
+  // Web page execution (e.g. SteamDB, Turnstile, Cloudflare challenges)
+  // Ensure authentic Google Chrome runtime properties in main world (world 0)
+  try {
+    const stealthCode = `
+      // 1. Remove automation / webdriver flag
+      try {
+        delete Object.getPrototypeOf(navigator).webdriver;
+        Object.defineProperty(Object.getPrototypeOf(navigator), 'webdriver', {
+          get: () => undefined,
+          configurable: true,
+          enumerable: true
+        });
+      } catch (e) {}
+
+      // 2. Standard Google Chrome window.chrome object
+      try {
+        if (!window.chrome) {
+          window.chrome = {};
+        }
+        if (!window.chrome.runtime) {
+          window.chrome.runtime = {
+            OnInstalledReason: { CHROME_UPDATE: 'chrome_update', INSTALL: 'install', SHARED_MODULE_UPDATE: 'shared_module_update', UPDATE: 'update' },
+            OnRestartRequiredReason: { APP_UPDATE: 'app_update', OS_UPDATE: 'os_update', PERIODIC: 'periodic' },
+            PlatformArch: { ARM: 'arm', ARM64: 'arm64', MIPS: 'mips', MIPS64: 'mips64', X86_32: 'x86-32', X86_64: 'x86-64' },
+            PlatformNaclArch: { ARM: 'arm', MIPS: 'mips', MIPS64: 'mips64', X86_32: 'x86-32', X86_64: 'x86-64' },
+            PlatformOs: { ANDROID: 'android', CROS: 'cros', LINUX: 'linux', MAC: 'mac', OPENBSD: 'openbsd', WIN: 'win' },
+            RequestUpdateCheckStatus: { NO_UPDATE: 'no_update', THROTTLED: 'throttled', UPDATE_AVAILABLE: 'update_available' },
+            connect: function () {},
+            sendMessage: function () {}
+          };
+        }
+        if (!window.chrome.app) {
+          window.chrome.app = {
+            isInstalled: false,
+            InstallState: { DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' },
+            RunningState: { CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running' },
+            getDetails: function () {},
+            getIsInstalled: function () {},
+            installState: function () {},
+            runningState: function () {}
+          };
+        }
+      } catch (e) {}
+
+      // 3. Populate plugins array if empty
+      try {
+        if (!navigator.plugins || navigator.plugins.length === 0) {
+          const pluginsArray = [
+            { name: 'PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+            { name: 'Chrome PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+            { name: 'Chromium PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+            { name: 'Microsoft Edge PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+            { name: 'WebKit built-in PDF', filename: 'internal-pdf-viewer', description: 'Portable Document Format' }
+          ];
+          Object.defineProperty(Object.getPrototypeOf(navigator), 'plugins', {
+            get: () => pluginsArray,
+            configurable: true
+          });
+        }
+      } catch (e) {}
+    `;
+    if (webFrame && webFrame.executeJavaScriptInIsolatedWorld) {
+      webFrame.executeJavaScriptInIsolatedWorld(0, [{ code: stealthCode }]);
+    }
+  } catch (err) {}
 }

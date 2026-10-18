@@ -46,6 +46,34 @@ class OniShield {
         return;
       }
 
+      // Never block Cloudflare Turnstile or security challenge requests
+      if (details.url && (details.url.includes('/cdn-cgi/') || details.url.includes('challenges.cloudflare.com') || details.url.includes('turnstile'))) {
+        callback({ cancel: false });
+        return;
+      }
+
+      // If top-level navigation (e.g. user clicked sponsored ad redirect like googleadservices.com/pagead/)
+      if (details.resourceType === 'mainFrame') {
+        try {
+          const parsed = new URL(details.url);
+          const adurl = parsed.searchParams.get('adurl') ||
+                        parsed.searchParams.get('ad_url') ||
+                        parsed.searchParams.get('dest') ||
+                        parsed.searchParams.get('target') ||
+                        parsed.searchParams.get('url');
+          if (adurl && /^https?:\/\//i.test(adurl)) {
+            this.totalBlocked++;
+            this.notifyListeners();
+            callback({ redirectURL: adurl });
+            return;
+          }
+        } catch (e) {}
+
+        // Allow mainFrame navigations (e.g. ad click redirects) to proceed to destination page
+        callback({ cancel: false });
+        return;
+      }
+
       // Check if URL matches blocked trackers
       this.totalBlocked++;
       try {

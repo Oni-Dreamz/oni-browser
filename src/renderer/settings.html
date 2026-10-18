@@ -94,6 +94,20 @@
       <div id="page-theme-status" class="theme-status-msg hidden"></div>
     </div>
 
+    <!-- System Updates Card -->
+    <div class="os-update-card" id="page-update-card">
+      <div class="os-update-header">
+        <div class="os-update-titles">
+          <div class="os-settings-group-label" style="margin-bottom: 2px; color: var(--accent-green);">SYSTEM UPDATES</div>
+          <div class="os-update-version-subtitle" id="page-update-version">Current Version: v1.0.0</div>
+        </div>
+        <button type="button" class="os-update-btn" id="page-update-action-btn">
+          [ Check for Updates ]
+        </button>
+      </div>
+      <div class="os-update-status-row" id="page-update-status-row"></div>
+    </div>
+
     <div class="setting-group">
       <div class="setting-label">Default Search Engine</div>
       <div class="setting-desc">Sets default search provider for omnibox queries.</div>
@@ -310,6 +324,180 @@
             clearDataBtn.textContent = 'Delete Browsing Data';
           }
         });
+      // System Updates logic
+      const updater = (window.electronAPI && window.electronAPI.updater) || (window.oniAPI && window.oniAPI.updater);
+      let pageAppVersion = '1.0.0';
+      let pageUpdateState = {
+        status: 'idle',
+        percent: 0,
+        downloadedVersion: '',
+        errorMessage: '',
+        checkedOnce: false
+      };
+
+      function escapeHtml(str) {
+        if (!str) return '';
+        return String(str)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#039;');
+      }
+
+      function renderPageUpdateStatus(state) {
+        if (state.status === 'checking') {
+          return `
+            <div class="os-update-status-checking">
+              <span class="os-update-spinner"></span>
+              <span>Scanning For Updates...</span>
+            </div>
+          `;
+        }
+        if (state.status === 'available' || state.status === 'downloading') {
+          const pct = Math.max(0, Math.min(100, state.percent || 0));
+          return `
+            <div class="os-update-progress-wrap">
+              <div class="os-update-progress-label">
+                <span>Downloading update: ${pct}%</span>
+                <span>${pct}%</span>
+              </div>
+              <div class="os-update-progress-bar-bg">
+                <div class="os-update-progress-bar-fill" style="width: ${pct}%;"></div>
+              </div>
+            </div>
+          `;
+        }
+        if (state.status === 'downloaded') {
+          return `
+            <div class="os-update-status-ready">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              <span>v${escapeHtml(state.downloadedVersion || 'new version')} ready to install</span>
+            </div>
+          `;
+        }
+        if (state.status === 'error') {
+          return `
+            <div class="os-update-status-error">
+              <span class="os-update-error-msg" title="${escapeHtml(state.errorMessage)}">${escapeHtml(state.errorMessage || 'Failed to check for updates')}</span>
+              <button type="button" class="os-update-retry-btn" id="page-update-retry-btn">[ Retry ]</button>
+            </div>
+          `;
+        }
+        if (state.checkedOnce) {
+          return `
+            <div class="os-update-status-uptodate">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              <span>Up to date</span>
+            </div>
+          `;
+        }
+        return '';
+      }
+
+      function updatePageUpdateUI() {
+        const actionBtn = document.getElementById('page-update-action-btn');
+        const statusRow = document.getElementById('page-update-status-row');
+        const verEl = document.getElementById('page-update-version');
+
+        if (verEl) verEl.textContent = `Current Version: v${pageAppVersion}`;
+
+        if (actionBtn) {
+          if (pageUpdateState.status === 'downloaded') {
+            actionBtn.textContent = '[ Restart & Install ]';
+            actionBtn.classList.add('install-ready');
+            actionBtn.disabled = false;
+          } else if (pageUpdateState.status === 'checking') {
+            actionBtn.textContent = '[ Checking... ]';
+            actionBtn.classList.remove('install-ready');
+            actionBtn.disabled = true;
+          } else {
+            actionBtn.textContent = '[ Check for Updates ]';
+            actionBtn.classList.remove('install-ready');
+            actionBtn.disabled = false;
+          }
+        }
+
+        if (statusRow) {
+          statusRow.innerHTML = renderPageUpdateStatus(pageUpdateState);
+          const retryBtn = document.getElementById('page-update-retry-btn');
+          if (retryBtn) {
+            retryBtn.addEventListener('click', (e) => {
+              e.stopPropagation();
+              triggerPageUpdateCheck();
+            });
+          }
+        }
+      }
+
+      async function triggerPageUpdateCheck() {
+        if (!updater) return;
+        pageUpdateState.status = 'checking';
+        pageUpdateState.errorMessage = '';
+        updatePageUpdateUI();
+
+        try {
+          if (updater.checkForUpdates) {
+            await updater.checkForUpdates();
+          }
+        } catch (err) {
+          pageUpdateState.status = 'error';
+          pageUpdateState.errorMessage = err?.message || 'Failed to check for updates';
+          updatePageUpdateUI();
+        }
+      }
+
+      const pageActionBtn = document.getElementById('page-update-action-btn');
+      if (pageActionBtn) {
+        pageActionBtn.addEventListener('click', async () => {
+          if (pageUpdateState.status === 'downloaded') {
+            if (updater && updater.installUpdate) {
+              updater.installUpdate();
+            }
+          } else {
+            await triggerPageUpdateCheck();
+          }
+        });
+      }
+
+      if (updater && updater.onUpdaterEvent) {
+        updater.onUpdaterEvent((data) => {
+          if (!data) return;
+          const evt = data.event || data.status;
+          if (evt === 'checking-for-update' || data.status === 'checking') {
+            pageUpdateState.status = 'checking';
+            pageUpdateState.errorMessage = '';
+          } else if (evt === 'update-available' || data.status === 'available') {
+            pageUpdateState.status = 'downloading';
+            pageUpdateState.percent = 0;
+            pageUpdateState.errorMessage = '';
+          } else if (evt === 'update-not-available' || data.status === 'not-available') {
+            pageUpdateState.status = 'idle';
+            pageUpdateState.checkedOnce = true;
+            pageUpdateState.errorMessage = '';
+          } else if (evt === 'download-progress' || data.status === 'downloading') {
+            pageUpdateState.status = 'downloading';
+            pageUpdateState.percent = data.percent || 0;
+            pageUpdateState.errorMessage = '';
+          } else if (evt === 'update-downloaded' || data.status === 'downloaded') {
+            pageUpdateState.status = 'downloaded';
+            pageUpdateState.downloadedVersion = data.version || (data.info && data.info.version) || '';
+            pageUpdateState.errorMessage = '';
+          } else if (evt === 'error' || data.status === 'error') {
+            pageUpdateState.status = 'error';
+            pageUpdateState.errorMessage = data.message || 'Error checking for updates';
+          }
+          updatePageUpdateUI();
+        });
+      }
+
+      if (updater && updater.getVersion) {
+        updater.getVersion().then(v => {
+          if (v) {
+            pageAppVersion = v;
+            updatePageUpdateUI();
+          }
+        }).catch(() => {});
       }
 
       await loadPageSettings();

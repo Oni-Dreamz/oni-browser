@@ -127,6 +127,37 @@
     });
   }
 
+  function launchAppFromDock(targetUrl) {
+    if (!targetUrl) return;
+    closeStartMenu();
+
+    // Route Disney login bridge URLs properly
+    if (/^https?:\/\/login\.disney\.com\/.*DTCI-DISNEYPLUS\.WEB.*\/bridge\/web/i.test(targetUrl)) {
+      targetUrl = 'https://www.disneyplus.com/login';
+    }
+
+    // If an existing open tab matches this URL, switch to it
+    const normTarget = targetUrl.replace(/\/+$/, '').toLowerCase();
+    const existing = tabs.find(t => {
+      if (!t || !t.url || isDesktopHomeTab(t)) return false;
+      const normTab = t.url.replace(/\/+$/, '').toLowerCase();
+      return normTab === normTarget || (normTarget.startsWith('http') && normTab.startsWith(normTarget));
+    });
+
+    if (existing && window.oniAPI && window.oniAPI.switchTab) {
+      window.oniAPI.switchTab(existing.id);
+      return;
+    }
+
+    // If the active tab is currently blank oni://newtab, navigate it
+    const current = tabs.find(t => t.id === activeTabId);
+    if (current && current.url === 'oni://newtab' && window.oniAPI && window.oniAPI.navigate) {
+      window.oniAPI.navigate(targetUrl, current.id);
+    } else if (window.oniAPI && window.oniAPI.createTab) {
+      window.oniAPI.createTab(targetUrl);
+    }
+  }
+
   function renderStartMenuApps() {
     if (!startAppsGrid) return;
     startAppsGrid.innerHTML = '';
@@ -205,43 +236,10 @@
       item.appendChild(img);
       item.appendChild(span);
 
-      item.addEventListener('click', async (e) => {
+      item.addEventListener('click', (e) => {
         e.preventDefault();
         if (isStartMenuEditMode) return;
-        closeStartMenu();
-        let isHome = false;
-        let currentTabId = activeTabId;
-        try {
-          if (window.oniAPI && window.oniAPI.getTabs) {
-            const freshTabs = await window.oniAPI.getTabs();
-            if (Array.isArray(freshTabs)) {
-              tabs = freshTabs;
-              const current = freshTabs.find(t => t.isActive);
-              if (current) {
-                currentTabId = current.id;
-                isHome = isDesktopHomeTab(current);
-              }
-            }
-          }
-        } catch (err) {}
-
-        if (!currentTabId && activeTabId) {
-          currentTabId = activeTabId;
-          const current = tabs.find(t => t.id === activeTabId);
-          if (current) isHome = isDesktopHomeTab(current);
-        }
-
-        if (isHome || !currentTabId) {
-          if (window.oniAPI && window.oniAPI.createTab) {
-            window.oniAPI.createTab(app.url);
-          }
-        } else {
-          if (currentTabId && window.oniAPI && window.oniAPI.navigate) {
-            window.oniAPI.navigate(app.url, currentTabId);
-          } else if (window.oniAPI && window.oniAPI.createTab) {
-            window.oniAPI.createTab(app.url);
-          }
-        }
+        launchAppFromDock(app.url);
       });
 
       item.addEventListener('contextmenu', (e) => {
@@ -279,6 +277,8 @@
     return DEFAULT_GLOBE_SVG;
   }
 
+  let draggedDockTabId = null;
+
   function renderDockTabs() {
     if (!dockTabsEl) return;
     dockTabsEl.innerHTML = '';
@@ -299,11 +299,79 @@
     if (dockTabsWrap) dockTabsWrap.classList.remove('hidden');
     dockTabsEl.classList.remove('hidden');
 
-    webTabs.forEach(tab => {
+    webTabs.forEach((tab, index) => {
       const btn = document.createElement('button');
       btn.className = 'os-dock-item' + (tab.isActive ? ' active' : '');
       btn.setAttribute('type', 'button');
       btn.dataset.id = tab.id;
+      btn.draggable = true;
+
+      // Chrome-like tab reordering via drag & drop
+      btn.addEventListener('dragstart', (e) => {
+        draggedDockTabId = tab.id;
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', tab.id);
+        setTimeout(() => btn.classList.add('dragging'), 0);
+        hideTooltip();
+      });
+
+      btn.addEventListener('dragend', () => {
+        btn.classList.remove('dragging');
+        dockTabsEl.querySelectorAll('.os-dock-item').forEach(el => {
+          el.classList.remove('drag-over-left', 'drag-over-right');
+        });
+        draggedDockTabId = null;
+      });
+
+      btn.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.dataTransfer.dropEffect = 'move';
+        if (!draggedDockTabId || draggedDockTabId === tab.id) return;
+
+        const rect = btn.getBoundingClientRect();
+        const midX = rect.left + rect.width / 2;
+        const isRight = e.clientX > midX;
+
+        btn.classList.toggle('drag-over-left', !isRight);
+        btn.classList.toggle('drag-over-right', isRight);
+      });
+
+      btn.addEventListener('dragleave', () => {
+        btn.classList.remove('drag-over-left', 'drag-over-right');
+      });
+
+      btn.addEventListener('drop', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        btn.classList.remove('drag-over-left', 'drag-over-right');
+        if (!draggedDockTabId || draggedDockTabId === tab.id) return;
+
+        const rect = btn.getBoundingClientRect();
+        const midX = rect.left + rect.width / 2;
+        const isRight = e.clientX > midX;
+
+        const fromIdx = webTabs.findIndex(t => t.id === draggedDockTabId);
+        if (fromIdx === -1) return;
+
+        let toIdx = index;
+        if (isRight) toIdx = index + 1;
+        if (fromIdx < toIdx) toIdx--;
+
+        if (fromIdx !== toIdx) {
+          const [movedTab] = webTabs.splice(fromIdx, 1);
+          webTabs.splice(toIdx, 0, movedTab);
+
+          const homeTabs = tabs.filter(t => isDesktopHomeTab(t));
+          tabs = [...homeTabs, ...webTabs];
+
+          const orderedIds = tabs.map(t => t.id);
+          if (window.oniAPI && window.oniAPI.reorderTabs) {
+            window.oniAPI.reorderTabs(orderedIds);
+          }
+          renderDockTabs();
+        }
+      });
 
       if (tab.isLoading) {
         const spinner = document.createElement('div');
@@ -337,7 +405,9 @@
       btn.appendChild(pill);
 
       btn.addEventListener('mouseenter', () => {
-        showTooltipForElement(btn, tab.title || 'Tab', tab.url || '');
+        if (!btn.classList.contains('dragging')) {
+          showTooltipForElement(btn, tab.title || 'Tab', tab.url || '');
+        }
       });
 
       btn.addEventListener('mouseleave', () => {
@@ -412,46 +482,14 @@
     }
 
     // App context menu actions
-    document.getElementById('ctx-app-open')?.addEventListener('click', async (e) => {
+    document.getElementById('ctx-app-open')?.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
       const app = activeContextApp;
       hideAppContextMenu();
       if (!app) return;
       closeStartMenu();
-      let isHome = false;
-      let currentTabId = activeTabId;
-      try {
-        if (window.oniAPI && window.oniAPI.getTabs) {
-          const freshTabs = await window.oniAPI.getTabs();
-          if (Array.isArray(freshTabs)) {
-            tabs = freshTabs;
-            const current = freshTabs.find(t => t.isActive);
-            if (current) {
-              currentTabId = current.id;
-              isHome = isDesktopHomeTab(current);
-            }
-          }
-        }
-      } catch (err) {}
-
-      if (!currentTabId && activeTabId) {
-        currentTabId = activeTabId;
-        const current = tabs.find(t => t.id === activeTabId);
-        if (current) isHome = isDesktopHomeTab(current);
-      }
-
-      if (isHome || !currentTabId) {
-        if (window.oniAPI && window.oniAPI.createTab) {
-          window.oniAPI.createTab(app.url);
-        }
-      } else {
-        if (currentTabId && window.oniAPI && window.oniAPI.navigate) {
-          window.oniAPI.navigate(app.url, currentTabId);
-        } else if (window.oniAPI && window.oniAPI.createTab) {
-          window.oniAPI.createTab(app.url);
-        }
-      }
+      launchAppFromDock(app.url);
     });
 
     document.getElementById('ctx-app-open-tab')?.addEventListener('click', (e) => {
@@ -661,6 +699,17 @@
             activeTabId = id;
             tabs.forEach(t => { t.isActive = (t.id === id); });
             renderDockTabs();
+          });
+        }
+
+        if (window.oniAPI.onTabsReordered) {
+          window.oniAPI.onTabsReordered((orderedTabs) => {
+            if (Array.isArray(orderedTabs)) {
+              tabs = orderedTabs;
+              const current = tabs.find(t => t.isActive);
+              if (current) activeTabId = current.id;
+              renderDockTabs();
+            }
           });
         }
 

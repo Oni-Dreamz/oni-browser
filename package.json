@@ -8,9 +8,9 @@
   "scripts": {
     "start": "electron .",
     "make-ico": "electron scripts/make-ico.js",
-    "build:portable": "electron-builder --win portable",
     "build:installer": "electron-builder --win nsis",
-    "build": "electron-builder --win portable"
+    "build:portable": "electron-builder --win portable",
+    "build": "electron-builder --win nsis"
   },
   "build": {
     "appId": "com.onilab.onibrowser",
@@ -19,6 +19,13 @@
     "directories": {
       "output": "dist"
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Oni-Dreamz",
+        "repo": "oni-browser"
+      }
+    ],
     "files": [
       "src/**/*",
       "assets/**/*",
@@ -28,23 +35,27 @@
       "icon": "assets/icon.ico",
       "target": [
         {
-          "target": "portable",
+          "target": "nsis",
           "arch": [
             "x64"
           ]
         }
       ]
     },
-    "portable": {
-      "artifactName": "Oni Browser Standalone.exe"
-    },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Oni Browser"
+      "shortcutName": "Oni Browser",
+      "artifactName": "Oni-Browser-Setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "Oni Browser Standalone.exe"
     }
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.0"
   },
   "devDependencies": {
     "electron": "^44.7.2",

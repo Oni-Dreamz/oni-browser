@@ -343,6 +343,9 @@ function cloneDeep(obj) {
 
 function normalizePinUrl(rawUrl) {
   if (!rawUrl) return '';
+  if (/^https?:\/\/login\.disney\.com\/.*DTCI-DISNEYPLUS\.WEB.*\/bridge\/web/i.test(rawUrl)) {
+    return 'https://www.disneyplus.com/login';
+  }
   try {
     const u = new URL(rawUrl);
     const host = u.hostname.replace(/^www\./i, '').toLowerCase();
@@ -947,6 +950,12 @@ class Store {
 
   addBookmark(bookmark) {
     if (!bookmark || !bookmark.url) return this.getBookmarks();
+    if (/^https?:\/\/login\.disney\.com\/.*DTCI-DISNEYPLUS\.WEB.*\/bridge\/web/i.test(bookmark.url)) {
+      bookmark.url = 'https://www.disneyplus.com/login';
+      if (!bookmark.title || bookmark.title === 'Loading...' || bookmark.title.includes('disney.com')) {
+        bookmark.title = 'Disney+ Log In';
+      }
+    }
     let iconUrl = bookmark.icon || bookmark.favicon || '';
     if (!iconUrl) {
       try {
@@ -1038,16 +1047,26 @@ class Store {
 
   setBookmarks(bookmarks) {
     if (!Array.isArray(bookmarks)) return this.data.bookmarks || [];
-    this.data.bookmarks = bookmarks.map((b, idx) => ({
-      id: b.id || ('pin_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5)),
-      title: b.title || 'Untitled',
-      url: b.url,
-      icon: b.icon || b.favicon || '',
-      favicon: b.favicon || b.icon || '',
-      gridCol: (b.gridCol !== undefined && !isNaN(b.gridCol)) ? Number(b.gridCol) : Math.floor(idx / 6),
-      gridRow: (b.gridRow !== undefined && !isNaN(b.gridRow)) ? Number(b.gridRow) : (idx % 6),
-      createdAt: b.createdAt || Date.now()
-    }));
+    this.data.bookmarks = bookmarks.map((b, idx) => {
+      let bUrl = b.url;
+      let bTitle = b.title;
+      if (bUrl && /^https?:\/\/login\.disney\.com\/.*DTCI-DISNEYPLUS\.WEB.*\/bridge\/web/i.test(bUrl)) {
+        bUrl = 'https://www.disneyplus.com/login';
+        if (!bTitle || bTitle === 'Loading...' || bTitle.includes('disney.com')) {
+          bTitle = 'Disney+ Log In';
+        }
+      }
+      return {
+        id: b.id || ('pin_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5)),
+        title: bTitle || 'Untitled',
+        url: bUrl,
+        icon: b.icon || b.favicon || '',
+        favicon: b.favicon || b.icon || '',
+        gridCol: (b.gridCol !== undefined && !isNaN(b.gridCol)) ? Number(b.gridCol) : Math.floor(idx / 6),
+        gridRow: (b.gridRow !== undefined && !isNaN(b.gridRow)) ? Number(b.gridRow) : (idx % 6),
+        createdAt: b.createdAt || Date.now()
+      };
+    });
     this.syncPinnedAppsToThemes();
     this.saveData();
     return this.data.bookmarks;
