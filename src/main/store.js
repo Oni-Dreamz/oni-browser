@@ -430,6 +430,11 @@ class Store {
       accentColor: 'emerald',
       activeWallpaper: DEFAULT_WALLPAPER_URL,
       customWallpapers: [],
+      desktopWidgets: {
+        clock: { enabled: true, gridCol: null, gridRow: 0 },
+        search: { enabled: true, gridCol: null, gridRow: 2 },
+        shield: { enabled: true, gridCol: null, gridRow: 3 }
+      },
       defaultPinsCleared_v2: true,
       adBlockEnabled: true,
       hardwareAcceleration: true,
@@ -453,6 +458,12 @@ class Store {
       if (fs.existsSync(this.filePath)) {
         const raw = fs.readFileSync(this.filePath, 'utf-8');
         const parsed = JSON.parse(raw);
+        const parsedWidgets = (parsed.settings && parsed.settings.desktopWidgets) || {};
+        const mergedWidgets = {
+          clock: { ...defaults.settings.desktopWidgets.clock, ...(parsedWidgets.clock || {}) },
+          search: { ...defaults.settings.desktopWidgets.search, ...(parsedWidgets.search || {}) },
+          shield: { ...defaults.settings.desktopWidgets.shield, ...(parsedWidgets.shield || {}) }
+        };
         const mergedSettings = {
           ...defaults.settings,
           ...(parsed.settings || {}),
@@ -461,7 +472,8 @@ class Store {
           activeWallpaper: (parsed.settings && parsed.settings.activeWallpaper) || DEFAULT_WALLPAPER_URL,
           customWallpapers: Array.isArray(parsed.settings && parsed.settings.customWallpapers)
             ? parsed.settings.customWallpapers
-            : []
+            : [],
+          desktopWidgets: mergedWidgets
         };
 
         // Ensure themes array exists and includes both Oni OS and Classic themes
@@ -677,11 +689,28 @@ class Store {
   }
 
   updateSettings(newSettings) {
+    const prevWidgets = (this.data.settings && this.data.settings.desktopWidgets) || {
+      clock: { enabled: true, gridCol: null, gridRow: 0 },
+      search: { enabled: true, gridCol: null, gridRow: 2 },
+      shield: { enabled: true, gridCol: null, gridRow: 3 }
+    };
     this.data.settings = { ...this.data.settings, ...newSettings };
+    if (newSettings && newSettings.desktopWidgets) {
+      this.data.settings.desktopWidgets = {
+        clock: { ...prevWidgets.clock, ...(newSettings.desktopWidgets.clock || {}) },
+        search: { ...prevWidgets.search, ...(newSettings.desktopWidgets.search || {}) },
+        shield: { ...prevWidgets.shield, ...(newSettings.desktopWidgets.shield || {}) }
+      };
+    }
     if (newSettings.activeThemeId) {
       this.data.settings.theme = newSettings.activeThemeId;
     } else if (newSettings.theme) {
       this.data.settings.activeThemeId = newSettings.theme;
+    }
+    if (newSettings.searchEngine && Array.isArray(this.data.themes)) {
+      this.data.themes.forEach(t => {
+        if (t.behavior) t.behavior.searchEngine = newSettings.searchEngine;
+      });
     }
     if (newSettings.showBookmarksBar !== undefined && Array.isArray(this.data.themes)) {
       const classicTheme = this.data.themes.find(t => t.id === 'classic');
@@ -942,8 +971,28 @@ class Store {
       return this.data.bookmarks;
     }
 
-    // Find next vacant grid cell (col, row) on desktop
+    // Find next vacant grid cell (col, row) on desktop, avoiding both Pinned Apps and active Widgets
     const occupied = new Set((this.data.bookmarks || []).map(b => `${b.gridCol},${b.gridRow}`));
+    const widgetsCfg = (this.data.settings && this.data.settings.desktopWidgets) || {};
+    const widgetSpans = {
+      clock: { colSpan: 3, rowSpan: 2 },
+      search: { colSpan: 3, rowSpan: 1 },
+      shield: { colSpan: 3, rowSpan: 1 }
+    };
+    Object.entries(widgetSpans).forEach(([wid, span]) => {
+      const w = widgetsCfg[wid];
+      if (w && w.enabled !== false && w.gridCol !== null && w.gridCol !== undefined && w.gridRow !== null && w.gridRow !== undefined) {
+        const wc = Number(w.gridCol);
+        const wr = Number(w.gridRow);
+        if (!isNaN(wc) && !isNaN(wr)) {
+          for (let dc = 0; dc < span.colSpan; dc++) {
+            for (let dr = 0; dr < span.rowSpan; dr++) {
+              occupied.add(`${wc + dc},${wr + dr}`);
+            }
+          }
+        }
+      }
+    });
     let freeCol = 0;
     let freeRow = 0;
     for (let c = 0; c < 30; c++) {

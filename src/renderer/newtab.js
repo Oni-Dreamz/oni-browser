@@ -30,8 +30,20 @@
   const osAppContextMenu = document.getElementById('os-app-context-menu');
   const osGridHighlight = document.getElementById('os-grid-highlight');
   let draggedDesktopAppId = null;
+  let draggedDesktopItem = null;
   let activeContextApp = null;
   let activeContextSource = 'desktop';
+
+  const DESKTOP_WIDGET_SPECS = [
+    { id: 'clock', elId: 'os-widget-clock', colSpan: 3, rowSpan: 2, defaultRow: 0, widthPx: 290, heightPx: 204 },
+    { id: 'search', elId: 'os-widget-search', colSpan: 3, rowSpan: 1, defaultRow: 2, widthPx: 290, heightPx: 98 },
+    { id: 'shield', elId: 'os-widget-shield', colSpan: 3, rowSpan: 1, defaultRow: 3, widthPx: 290, heightPx: 98 }
+  ];
+  let desktopWidgetsConfig = {
+    clock: { enabled: true, gridCol: null, gridRow: 0 },
+    search: { enabled: true, gridCol: null, gridRow: 2 },
+    shield: { enabled: true, gridCol: null, gridRow: 3 }
+  };
 
   const osMenubarClock = document.getElementById('os-menubar-clock');
   const osMenubarDate = document.getElementById('os-menubar-date');
@@ -381,11 +393,411 @@
   // =========================================================
   // ONI OS DESKTOP ENVIRONMENT RENDERING & INTERACTION
   // =========================================================
-  function renderDesktopApps() {
+  function getDesktopGridMetrics() {
+    const iconRect = osDesktopIcons ? osDesktopIcons.getBoundingClientRect() : null;
+    const width = (iconRect && iconRect.width > 0) ? iconRect.width : Math.max(400, window.innerWidth - 48);
+    const height = (iconRect && iconRect.height > 0) ? iconRect.height : Math.max(400, window.innerHeight - 106);
+    const leftOffset = (iconRect && iconRect.width > 0) ? iconRect.left : 24;
+    const topOffset = (iconRect && iconRect.height > 0) ? iconRect.top : 22;
+
+    const tileW = 90;
+    const tileH = 98;
+    const stepY = 108;
+    const maxCols = Math.max(4, Math.floor((width + 10) / 100));
+    const maxRows = Math.max(4, Math.floor((height + 10) / stepY));
+    const stepX = maxCols > 1 ? (width - tileW) / (maxCols - 1) : 100;
+
+    return {
+      width,
+      height,
+      leftOffset,
+      topOffset,
+      tileW,
+      tileH,
+      stepX,
+      stepY,
+      maxCols,
+      maxRows,
+      colToX: (col) => Math.round(col * stepX),
+      rowToY: (row) => Math.round(row * stepY),
+      spanToWidth: (colSpan) => Math.round((colSpan - 1) * stepX + tileW),
+      spanToHeight: (rowSpan) => Math.round((rowSpan - 1) * stepY + tileH),
+      pointerToCol: (relX) => Math.min(maxCols - 1, Math.max(0, Math.floor((relX + (stepX - tileW) / 2) / stepX))),
+      pointerToRow: (relY) => Math.min(maxRows - 1, Math.max(0, Math.floor((relY + (stepY - tileH) / 2) / stepY)))
+    };
+  }
+
+  function rectFitsAndFree(col, row, colSpan, rowSpan, occupiedSet, maxCols, maxRows) {
+    if (col < 0 || row < 0 || col + colSpan > maxCols || row + rowSpan > maxRows) {
+      return false;
+    }
+    for (let dc = 0; dc < colSpan; dc++) {
+      for (let dr = 0; dr < rowSpan; dr++) {
+        if (occupiedSet.has(`${col + dc},${row + dr}`)) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  function markRectOccupied(col, row, colSpan, rowSpan, occupiedSet) {
+    for (let dc = 0; dc < colSpan; dc++) {
+      for (let dr = 0; dr < rowSpan; dr++) {
+        occupiedSet.add(`${col + dc},${row + dr}`);
+      }
+    }
+  }
+
+  function findFreeWidgetSlot(spec, occupiedSet, maxCols, maxRows) {
+    const rightCol = Math.max(0, maxCols - spec.colSpan);
+    if (rectFitsAndFree(rightCol, spec.defaultRow, spec.colSpan, spec.rowSpan, occupiedSet, maxCols, maxRows)) {
+      return { col: rightCol, row: spec.defaultRow };
+    }
+    for (let c = rightCol; c >= 0; c--) {
+      for (let r = 0; r <= maxRows - spec.rowSpan; r++) {
+        if (rectFitsAndFree(c, r, spec.colSpan, spec.rowSpan, occupiedSet, maxCols, maxRows)) {
+          return { col: c, row: r };
+        }
+      }
+    }
+    return { col: rightCol, row: Math.min(Math.max(0, maxRows - spec.rowSpan), spec.defaultRow) };
+  }
+
+  function resolveDesktopGridState(metrics, persistIfChanged = false) {
+    const m = metrics || getDesktopGridMetrics();
+    const widgetOccupied = new Set();
+    let widgetsModified = false;
+    let appsModified = false;
+
+    const needsPlacement = [];
+
+    // Pass 1: Place active widgets that already have valid non-overlapping coordinates
+    DESKTOP_WIDGET_SPECS.forEach(spec => {
+      const cfg = (desktopWidgetsConfig && desktopWidgetsConfig[spec.id]) || {
+        enabled: true,
+        gridCol: null,
+        gridRow: null
+      };
+      if (cfg.enabled === false) return;
+
+      const hasCoords = cfg.gridCol !== null && cfg.gridCol !== undefined && !isNaN(cfg.gridCol) &&
+                        cfg.gridRow !== null && cfg.gridRow !== undefined && !isNaN(cfg.gridRow);
+      if (!hasCoords) {
+        needsPlacement.push(spec);
+        return;
+      }
+
+      const col = Math.min(Math.max(0, m.maxCols - spec.colSpan), Math.max(0, Number(cfg.gridCol)));
+      const row = Math.min(Math.max(0, m.maxRows - spec.rowSpan), Math.max(0, Number(cfg.gridRow)));
+
+      if (rectFitsAndFree(col, row, spec.colSpan, spec.rowSpan, widgetOccupied, m.maxCols, m.maxRows)) {
+        if (cfg.gridCol !== col || cfg.gridRow !== row) {
+          desktopWidgetsConfig[spec.id] = { ...cfg, gridCol: col, gridRow: row };
+          widgetsModified = true;
+        }
+        markRectOccupied(col, row, spec.colSpan, spec.rowSpan, widgetOccupied);
+      } else {
+        needsPlacement.push(spec);
+      }
+    });
+
+    // Pass 2: Place newly added or colliding widgets into available space (avoiding both widgets and pinned apps)
+    if (needsPlacement.length > 0) {
+      const allOccupied = new Set(widgetOccupied);
+      pinnedApps.forEach(app => {
+        if (app.gridCol !== undefined && app.gridRow !== undefined) {
+          allOccupied.add(`${app.gridCol},${app.gridRow}`);
+        }
+      });
+
+      needsPlacement.forEach(spec => {
+        let slot = findFreeWidgetSlot(spec, allOccupied, m.maxCols, m.maxRows);
+        if (!rectFitsAndFree(slot.col, slot.row, spec.colSpan, spec.rowSpan, widgetOccupied, m.maxCols, m.maxRows)) {
+          slot = findFreeWidgetSlot(spec, widgetOccupied, m.maxCols, m.maxRows);
+        }
+        desktopWidgetsConfig[spec.id] = {
+          ...(desktopWidgetsConfig[spec.id] || {}),
+          enabled: true,
+          gridCol: slot.col,
+          gridRow: slot.row
+        };
+        widgetsModified = true;
+        markRectOccupied(slot.col, slot.row, spec.colSpan, spec.rowSpan, widgetOccupied);
+        markRectOccupied(slot.col, slot.row, spec.colSpan, spec.rowSpan, allOccupied);
+      });
+    }
+
+    // Pass 3: Ensure no Pinned App overlaps any active Widget or another Pinned App
+    const usedCells = new Set(widgetOccupied);
+    pinnedApps.forEach((app, idx) => {
+      let col = (app.gridCol !== undefined && !isNaN(app.gridCol)) ? Number(app.gridCol) : Math.floor(idx / 6);
+      let row = (app.gridRow !== undefined && !isNaN(app.gridRow)) ? Number(app.gridRow) : (idx % 6);
+      col = Math.min(m.maxCols - 1, Math.max(0, col));
+      row = Math.min(m.maxRows - 1, Math.max(0, row));
+
+      if (usedCells.has(`${col},${row}`)) {
+        let found = false;
+        for (let c = 0; c < m.maxCols; c++) {
+          for (let r = 0; r < m.maxRows; r++) {
+            if (!usedCells.has(`${c},${r}`)) {
+              col = c;
+              row = r;
+              found = true;
+              break;
+            }
+          }
+          if (found) break;
+        }
+      }
+
+      if (app.gridCol !== col || app.gridRow !== row) {
+        app.gridCol = col;
+        app.gridRow = row;
+        appsModified = true;
+      }
+      usedCells.add(`${col},${row}`);
+    });
+
+    if (persistIfChanged && window.oniAPI && (!osDesktop || !osDesktop.classList.contains('hidden'))) {
+      if (widgetsModified && window.oniAPI.updateSettings) {
+        window.oniAPI.updateSettings({ desktopWidgets: desktopWidgetsConfig });
+      }
+      if (appsModified && window.oniAPI.setBookmarks) {
+        window.oniAPI.setBookmarks(pinnedApps);
+      }
+    }
+
+    return { metrics: m, widgetOccupied };
+  }
+
+  function isCellOccupiedByActiveWidget(col, row, excludeWidgetId = null) {
+    for (const spec of DESKTOP_WIDGET_SPECS) {
+      if (spec.id === excludeWidgetId) continue;
+      const cfg = desktopWidgetsConfig && desktopWidgetsConfig[spec.id];
+      if (!cfg || cfg.enabled === false) continue;
+      const wc = Number(cfg.gridCol);
+      const wr = Number(cfg.gridRow);
+      if (isNaN(wc) || isNaN(wr)) continue;
+      if (col >= wc && col < wc + spec.colSpan && row >= wr && row < wr + spec.rowSpan) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function planWidgetDrop(wid, targetCol, targetRow, metrics) {
+    const spec = DESKTOP_WIDGET_SPECS.find(s => s.id === wid);
+    if (!spec) return { valid: false };
+
+    const m = metrics || getDesktopGridMetrics();
+    const col = Math.min(Math.max(0, m.maxCols - spec.colSpan), Math.max(0, targetCol));
+    const row = Math.min(Math.max(0, m.maxRows - spec.rowSpan), Math.max(0, targetRow));
+
+    const curCfg = (desktopWidgetsConfig && desktopWidgetsConfig[wid]) || { enabled: true, gridCol: m.maxCols - spec.colSpan, gridRow: spec.defaultRow };
+    const oldCol = (curCfg.gridCol !== null && curCfg.gridCol !== undefined && !isNaN(curCfg.gridCol))
+      ? Number(curCfg.gridCol)
+      : (m.maxCols - spec.colSpan);
+    const oldRow = (curCfg.gridRow !== null && curCfg.gridRow !== undefined && !isNaN(curCfg.gridRow))
+      ? Number(curCfg.gridRow)
+      : spec.defaultRow;
+
+    // Find any other active widgets overlapping target rectangle
+    const overlappingSpecs = DESKTOP_WIDGET_SPECS.filter(s => {
+      if (s.id === wid) return false;
+      const cfg = desktopWidgetsConfig && desktopWidgetsConfig[s.id];
+      if (!cfg || cfg.enabled === false) return false;
+      const wc = Number(cfg.gridCol);
+      const wr = Number(cfg.gridRow);
+      if (isNaN(wc) || isNaN(wr)) return false;
+      const horiz = col < (wc + s.colSpan) && (col + spec.colSpan) > wc;
+      const vert = row < (wr + s.rowSpan) && (row + spec.rowSpan) > wr;
+      return horiz && vert;
+    });
+
+    // Build set of cells occupied by non-overlapping active widgets
+    const fixedWidgetCells = new Set();
+    DESKTOP_WIDGET_SPECS.forEach(s => {
+      if (s.id === wid) return;
+      if (overlappingSpecs.some(o => o.id === s.id)) return;
+      const cfg = desktopWidgetsConfig && desktopWidgetsConfig[s.id];
+      if (!cfg || cfg.enabled === false) return;
+      const wc = Number(cfg.gridCol);
+      const wr = Number(cfg.gridRow);
+      if (!isNaN(wc) && !isNaN(wr)) {
+        markRectOccupied(wc, wr, s.colSpan, s.rowSpan, fixedWidgetCells);
+      }
+    });
+
+    const widgetMoves = {};
+
+    if (overlappingSpecs.length === 0) {
+      if (!rectFitsAndFree(col, row, spec.colSpan, spec.rowSpan, fixedWidgetCells, m.maxCols, m.maxRows)) {
+        return { valid: false };
+      }
+      widgetMoves[wid] = { col, row };
+    } else if (overlappingSpecs.length === 1) {
+      const otherSpec = overlappingSpecs[0];
+      const otherCfg = desktopWidgetsConfig[otherSpec.id];
+      const otherCol = Number(otherCfg.gridCol);
+      const otherRow = Number(otherCfg.gridRow);
+
+      const pairCandidates = [];
+      // 1. Direct placement at (col, row) with otherSpec pushed or swapped
+      if (row <= otherRow) {
+        pairCandidates.push({ w: { col, row }, o: { col: otherCol, row: row + spec.rowSpan } });
+      }
+      if (row > otherRow) {
+        pairCandidates.push({ w: { col, row }, o: { col: otherCol, row: row - otherSpec.rowSpan } });
+      }
+      pairCandidates.push({ w: { col, row }, o: { col: oldCol, row: oldRow } });
+      pairCandidates.push({ w: { col, row }, o: { col: oldCol, row: oldRow + spec.rowSpan - otherSpec.rowSpan } });
+      if (col <= otherCol) {
+        pairCandidates.push({ w: { col, row }, o: { col: col + spec.colSpan, row: otherRow } });
+      }
+      if (col > otherCol) {
+        pairCandidates.push({ w: { col, row }, o: { col: col - otherSpec.colSpan, row: otherRow } });
+      }
+
+      // 2. Stack-aligned swap (e.g., 1-row widget dropped onto lower half of 2-row widget)
+      if (oldRow >= otherRow) {
+        pairCandidates.push({
+          w: { col, row: otherRow },
+          o: { col: otherCol, row: otherRow + spec.rowSpan }
+        });
+      } else {
+        pairCandidates.push({
+          w: { col, row: otherRow + otherSpec.rowSpan - spec.rowSpan },
+          o: { col: otherCol, row: oldRow }
+        });
+        pairCandidates.push({
+          w: { col, row: oldRow + otherSpec.rowSpan },
+          o: { col: otherCol, row: oldRow }
+        });
+      }
+      pairCandidates.push({
+        w: { col, row: otherRow },
+        o: { col: otherCol, row: otherRow + spec.rowSpan }
+      });
+      pairCandidates.push({
+        w: { col, row: otherRow + otherSpec.rowSpan - spec.rowSpan },
+        o: { col: otherCol, row: otherRow - spec.rowSpan }
+      });
+
+      const validPair = pairCandidates.find(pair => {
+        if (!rectFitsAndFree(pair.w.col, pair.w.row, spec.colSpan, spec.rowSpan, fixedWidgetCells, m.maxCols, m.maxRows)) {
+          return false;
+        }
+        const tempOcc = new Set(fixedWidgetCells);
+        markRectOccupied(pair.w.col, pair.w.row, spec.colSpan, spec.rowSpan, tempOcc);
+        return rectFitsAndFree(pair.o.col, pair.o.row, otherSpec.colSpan, otherSpec.rowSpan, tempOcc, m.maxCols, m.maxRows);
+      });
+
+      if (!validPair) {
+        return { valid: false };
+      }
+      widgetMoves[wid] = validPair.w;
+      widgetMoves[otherSpec.id] = validPair.o;
+    } else {
+      // Multiple overlapped widgets (e.g. 2-row Clock dragged over two 1-row widgets)
+      if (!rectFitsAndFree(col, row, spec.colSpan, spec.rowSpan, fixedWidgetCells, m.maxCols, m.maxRows)) {
+        return { valid: false };
+      }
+      const tempOcc = new Set(fixedWidgetCells);
+      markRectOccupied(col, row, spec.colSpan, spec.rowSpan, tempOcc);
+      widgetMoves[wid] = { col, row };
+
+      const sortedOverlapping = [...overlappingSpecs].sort((a, b) => {
+        const ra = Number(desktopWidgetsConfig[a.id]?.gridRow || 0);
+        const rb = Number(desktopWidgetsConfig[b.id]?.gridRow || 0);
+        return ra - rb;
+      });
+
+      for (const otherSpec of sortedOverlapping) {
+        const otherCfg = desktopWidgetsConfig[otherSpec.id];
+        const otherCol = Number(otherCfg.gridCol);
+        const cands = [];
+        for (let r = oldRow; r < oldRow + spec.rowSpan; r++) {
+          cands.push({ col: oldCol, row: r });
+        }
+        for (let r = 0; r <= m.maxRows - otherSpec.rowSpan; r++) {
+          cands.push({ col: otherCol, row: r });
+          cands.push({ col: oldCol, row: r });
+        }
+        const validCand = cands.find(cand =>
+          rectFitsAndFree(cand.col, cand.row, otherSpec.colSpan, otherSpec.rowSpan, tempOcc, m.maxCols, m.maxRows)
+        );
+        if (!validCand) {
+          return { valid: false };
+        }
+        widgetMoves[otherSpec.id] = { col: validCand.col, row: validCand.row };
+        markRectOccupied(validCand.col, validCand.row, otherSpec.colSpan, otherSpec.rowSpan, tempOcc);
+      }
+    }
+
+    // Build complete set of widget cells after widgetMoves
+    const nextWidgetCells = new Set(fixedWidgetCells);
+    Object.entries(widgetMoves).forEach(([id, pos]) => {
+      const s = DESKTOP_WIDGET_SPECS.find(x => x.id === id);
+      if (s) markRectOccupied(pos.col, pos.row, s.colSpan, s.rowSpan, nextWidgetCells);
+    });
+
+    // Check if any pinned apps fall inside nextWidgetCells; relocate them to nearest free cells
+    const vacatedSet = new Set();
+    for (let dc = 0; dc < spec.colSpan; dc++) {
+      for (let dr = 0; dr < spec.rowSpan; dr++) {
+        const vc = oldCol + dc;
+        const vr = oldRow + dr;
+        if (vc >= 0 && vc < m.maxCols && vr >= 0 && vr < m.maxRows && !nextWidgetCells.has(`${vc},${vr}`)) {
+          vacatedSet.add(`${vc},${vr}`);
+        }
+      }
+    }
+
+    const usedCells = new Set(nextWidgetCells);
+    const collidingApps = [];
+    pinnedApps.forEach(app => {
+      const key = `${app.gridCol},${app.gridRow}`;
+      if (nextWidgetCells.has(key)) {
+        collidingApps.push(app);
+      } else {
+        usedCells.add(key);
+      }
+    });
+
+    const appMoves = [];
+    for (const app of collidingApps) {
+      const origC = Number(app.gridCol) || 0;
+      const origR = Number(app.gridRow) || 0;
+      let bestCell = null;
+      let bestScore = Infinity;
+
+      for (let c = 0; c < m.maxCols; c++) {
+        for (let r = 0; r < m.maxRows; r++) {
+          const k = `${c},${r}`;
+          if (usedCells.has(k)) continue;
+          const dist = Math.abs(c - origC) * 1.5 + Math.abs(r - origR) - (vacatedSet.has(k) ? 0.25 : 0);
+          if (dist < bestScore) {
+            bestScore = dist;
+            bestCell = { col: c, row: r };
+          }
+        }
+      }
+
+      if (!bestCell) {
+        return { valid: false };
+      }
+      usedCells.add(`${bestCell.col},${bestCell.row}`);
+      appMoves.push({ id: app.id, col: bestCell.col, row: bestCell.row });
+    }
+
+    return { valid: true, widgetMoves, appMoves };
+  }
+
+  function renderDesktopApps(providedMetrics) {
     if (!osDesktopIcons) return;
+    const { metrics } = resolveDesktopGridState(providedMetrics, false);
     osDesktopIcons.innerHTML = '';
-    const CELL_W = 100;
-    const CELL_H = 108;
 
     pinnedApps.forEach((app, idx) => {
       const tile = document.createElement('a');
@@ -396,13 +808,24 @@
 
       const col = (app.gridCol !== undefined && !isNaN(app.gridCol)) ? Number(app.gridCol) : Math.floor(idx / 6);
       const row = (app.gridRow !== undefined && !isNaN(app.gridRow)) ? Number(app.gridRow) : (idx % 6);
-      tile.style.left = `${col * CELL_W}px`;
-      tile.style.top = `${row * CELL_H}px`;
+      tile.style.left = `${metrics.colToX(col)}px`;
+      tile.style.top = `${metrics.rowToY(row)}px`;
 
       tile.draggable = true;
 
       tile.addEventListener('dragstart', (e) => {
+        const m = getDesktopGridMetrics();
         draggedDesktopAppId = app.id;
+        draggedDesktopItem = {
+          type: 'app',
+          id: app.id,
+          colSpan: 1,
+          rowSpan: 1,
+          grabOffsetCol: 0,
+          grabOffsetRow: 0,
+          widthPx: m.spanToWidth(1),
+          heightPx: m.spanToHeight(1)
+        };
         e.dataTransfer.effectAllowed = 'move';
         e.dataTransfer.setData('text/plain', app.id);
         setTimeout(() => tile.classList.add('dragging'), 0);
@@ -410,8 +833,12 @@
 
       tile.addEventListener('dragend', () => {
         tile.classList.remove('dragging');
-        if (osGridHighlight) osGridHighlight.classList.add('hidden');
+        if (osGridHighlight) {
+          osGridHighlight.classList.add('hidden');
+          osGridHighlight.classList.remove('invalid');
+        }
         draggedDesktopAppId = null;
+        draggedDesktopItem = null;
       });
 
       const iconBox = document.createElement('div');
@@ -442,6 +869,34 @@
       });
 
       osDesktopIcons.appendChild(tile);
+    });
+  }
+
+  function renderDesktopWidgets(providedMetrics, persistIfChanged = false) {
+    if (!osWidgetsPanel) return;
+    const { metrics } = resolveDesktopGridState(providedMetrics, persistIfChanged);
+
+    DESKTOP_WIDGET_SPECS.forEach(spec => {
+      const el = document.getElementById(spec.elId);
+      if (!el) return;
+      const cfg = (desktopWidgetsConfig && desktopWidgetsConfig[spec.id]) || {
+        enabled: true,
+        gridCol: null,
+        gridRow: spec.defaultRow
+      };
+      const isEnabled = cfg.enabled !== false;
+      el.classList.toggle('hidden', !isEnabled);
+      if (!isEnabled) return;
+
+      const col = Number(cfg.gridCol);
+      const row = Number(cfg.gridRow);
+
+      el.style.width = `${metrics.spanToWidth(spec.colSpan)}px`;
+      el.style.height = `${metrics.spanToHeight(spec.rowSpan)}px`;
+      el.style.left = `${metrics.colToX(col)}px`;
+      el.style.top = `${metrics.rowToY(row)}px`;
+      el.dataset.resolvedCol = String(col);
+      el.dataset.resolvedRow = String(row);
     });
   }
 
@@ -544,7 +999,9 @@
   }
 
   function renderOniOsDesktop() {
-    renderDesktopApps();
+    const m = getDesktopGridMetrics();
+    renderDesktopWidgets(m, true);
+    renderDesktopApps(m);
     renderStartMenuApps();
     renderSpotlightApps('');
   }
@@ -956,6 +1413,43 @@
       `;
     });
 
+    const widgetsCfg = (settings && settings.desktopWidgets) || desktopWidgetsConfig || {};
+    const widgetDefs = [
+      {
+        id: 'clock',
+        title: 'System Time // Tokyo-STD',
+        desc: 'Live digital clock, Kanji date telemetry, and active session status',
+        enabled: !widgetsCfg.clock || widgetsCfg.clock.enabled !== false
+      },
+      {
+        id: 'search',
+        title: 'Quick Command // Web & Apps',
+        desc: 'Desktop quick search bar with instant search engine switcher',
+        enabled: !widgetsCfg.search || widgetsCfg.search.enabled !== false
+      },
+      {
+        id: 'shield',
+        title: 'Oni Shield // Firewall',
+        desc: 'Real-time tracker neutralization and Chromium kernel telemetry',
+        enabled: !widgetsCfg.shield || widgetsCfg.shield.enabled !== false
+      }
+    ];
+
+    let widgetsHtml = '';
+    widgetDefs.forEach(w => {
+      widgetsHtml += `
+        <div class="os-list-row" style="cursor:default; margin-bottom:0; ${w.enabled ? 'border-color:rgba(var(--accent-rgb),0.3); background:rgba(var(--accent-rgb),0.06);' : ''}">
+          <div>
+            <div style="font-weight:600; color:#fff;">${w.title}</div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">${w.desc}</div>
+          </div>
+          <button type="button" class="${w.enabled ? 'os-btn-danger' : 'os-btn-primary'} os-widget-toggle-btn" data-widget-id="${w.id}" style="padding:5px 14px; font-size:11px; flex-shrink:0;">
+            ${w.enabled ? 'Remove' : 'Add to Home'}
+          </button>
+        </div>
+      `;
+    });
+
     body.innerHTML = `
       <div class="os-settings-layout">
         <aside class="os-settings-sidebar" aria-label="Settings Navigation">
@@ -973,6 +1467,15 @@
               <polyline points="2 12 12 17 22 12"></polyline>
             </svg>
             <span>Customization</span>
+          </button>
+          <button type="button" class="os-settings-nav-item ${activeSettingsSection === 'widgets' ? 'active' : ''}" data-section="widgets">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="7" height="7" rx="1"></rect>
+              <rect x="14" y="3" width="7" height="7" rx="1"></rect>
+              <rect x="14" y="14" width="7" height="7" rx="1"></rect>
+              <rect x="3" y="14" width="7" height="7" rx="1"></rect>
+            </svg>
+            <span>Widgets</span>
           </button>
           <button type="button" class="os-settings-nav-item ${activeSettingsSection === 'privacy' ? 'active' : ''}" data-section="privacy">
             <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -997,35 +1500,49 @@
             </div>
           </div>
 
-          <!-- Section 2: Customization -->
+          <!-- Section 2: Customization (Order: Theme -> Accent Color -> Wallpaper) -->
           <div class="os-settings-section ${activeSettingsSection === 'customization' ? '' : 'hidden'}" data-section-panel="customization">
             <div class="os-settings-section-header">
               <div class="os-settings-section-title">Customization</div>
-              <div class="os-settings-section-desc">Personalize your Oni Browser theme, wallpaper, and global accent color.</div>
+              <div class="os-settings-section-desc">Personalize your Oni Browser theme, global accent color, and wallpaper.</div>
             </div>
             <div style="margin-bottom: 18px;">
-              <div class="os-settings-group-label">Themes</div>
+              <div class="os-settings-group-label">Theme</div>
               <div style="display:flex; flex-direction:column; gap:8px;">
                 ${themesHtml}
               </div>
             </div>
 
             <div style="margin-bottom: 18px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.08);">
-              <div class="os-settings-group-label">Wallpaper</div>
-              <div class="os-wallpaper-grid">
-                ${wallpapersHtml}
-              </div>
-            </div>
-
-            <div style="padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.08);">
               <div class="os-settings-group-label">Accent Color</div>
               <div class="os-accent-grid">
                 ${accentColorsHtml}
               </div>
             </div>
+
+            <div style="padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.08);">
+              <div class="os-settings-group-label">Wallpaper</div>
+              <div class="os-wallpaper-grid">
+                ${wallpapersHtml}
+              </div>
+            </div>
           </div>
 
-          <!-- Section 3: Privacy and Data -->
+          <!-- Section 3: Widgets -->
+          <div class="os-settings-section ${activeSettingsSection === 'widgets' ? '' : 'hidden'}" data-section-panel="widgets">
+            <div class="os-settings-section-header">
+              <div class="os-settings-section-title">Widgets</div>
+              <div class="os-settings-section-desc">Add or remove desktop widgets from your Oni OS home page. Drag widgets on the home page to rearrange them on the grid.</div>
+            </div>
+            <div>
+              <div class="os-settings-group-label">Home Page Widgets</div>
+              <div style="display:flex; flex-direction:column; gap:8px;">
+                ${widgetsHtml}
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 4: Privacy and Data -->
           <div class="os-settings-section ${activeSettingsSection === 'privacy' ? '' : 'hidden'}" data-section-panel="privacy">
             <div class="os-settings-section-header">
               <div class="os-settings-section-title">Privacy and Data</div>
@@ -1126,6 +1643,29 @@
         }
       });
     }
+
+    body.querySelectorAll('.os-widget-toggle-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const wid = btn.dataset.widgetId;
+        if (wid && window.oniAPI && window.oniAPI.updateSettings) {
+          const cur = (widgetsCfg && widgetsCfg[wid]) || { enabled: true };
+          const nextEnabled = cur.enabled === false;
+          const updatedWidgets = {
+            ...widgetsCfg,
+            [wid]: {
+              enabled: nextEnabled,
+              gridCol: null,
+              gridRow: null
+            }
+          };
+          desktopWidgetsConfig = updatedWidgets;
+          renderDesktopWidgets(null, true);
+          renderDesktopApps();
+          await window.oniAPI.updateSettings({ desktopWidgets: desktopWidgetsConfig });
+          await renderOsSettingsWindow();
+        }
+      });
+    });
 
     body.querySelectorAll('.os-engine-choice').forEach(btn => {
       btn.addEventListener('click', async () => {
@@ -1336,7 +1876,59 @@
       });
     });
 
-    // Home Right-Click Context Menu & Desktop Grid Drag Drop
+    // Individual Draggable Desktop Widgets (Clock, Search, Shield)
+    DESKTOP_WIDGET_SPECS.forEach(spec => {
+      const widgetEl = document.getElementById(spec.elId);
+      if (!widgetEl) return;
+
+      widgetEl.addEventListener('mousedown', (e) => {
+        if (e.target.closest('input, button, a')) {
+          widgetEl.draggable = false;
+        } else {
+          widgetEl.draggable = true;
+        }
+      });
+
+      widgetEl.addEventListener('mouseup', () => {
+        widgetEl.draggable = true;
+      });
+
+      widgetEl.addEventListener('dragstart', (e) => {
+        if (e.target.closest('input, button, a')) {
+          e.preventDefault();
+          return;
+        }
+        const m = getDesktopGridMetrics();
+        const wRect = widgetEl.getBoundingClientRect();
+        const grabOffsetCol = Math.min(spec.colSpan - 1, Math.max(0, Math.floor((e.clientX - wRect.left) / m.stepX)));
+        const grabOffsetRow = Math.min(spec.rowSpan - 1, Math.max(0, Math.floor((e.clientY - wRect.top) / m.stepY)));
+        draggedDesktopItem = {
+          type: 'widget',
+          id: spec.id,
+          colSpan: spec.colSpan,
+          rowSpan: spec.rowSpan,
+          grabOffsetCol,
+          grabOffsetRow,
+          widthPx: m.spanToWidth(spec.colSpan),
+          heightPx: m.spanToHeight(spec.rowSpan)
+        };
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', `widget:${spec.id}`);
+        setTimeout(() => widgetEl.classList.add('dragging'), 0);
+      });
+
+      widgetEl.addEventListener('dragend', () => {
+        widgetEl.classList.remove('dragging');
+        widgetEl.draggable = true;
+        if (osGridHighlight) {
+          osGridHighlight.classList.add('hidden');
+          osGridHighlight.classList.remove('invalid');
+        }
+        draggedDesktopItem = null;
+      });
+    });
+
+    // Home Right-Click Context Menu & Desktop Grid Drag Drop (Pinned Apps + Widgets)
     const workspace = document.getElementById('os-workspace');
     if (workspace && osContextMenu) {
       workspace.addEventListener('contextmenu', (e) => {
@@ -1351,19 +1943,32 @@
       });
 
       workspace.addEventListener('dragover', (e) => {
-        if (!draggedDesktopAppId || !osDesktopIcons) return;
+        if (!draggedDesktopItem || !osDesktopIcons) return;
         e.preventDefault();
-        e.dataTransfer.dropEffect = 'move';
-        const rect = osDesktopIcons.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
-        const maxCols = Math.max(1, Math.floor(rect.width / 100));
-        const maxRows = Math.max(1, Math.floor(rect.height / 108));
-        const col = Math.min(maxCols - 1, Math.max(0, Math.floor(x / 100)));
-        const row = Math.min(maxRows - 1, Math.max(0, Math.floor(y / 108)));
+        const m = getDesktopGridMetrics();
+        const x = e.clientX - m.leftOffset;
+        const y = e.clientY - m.topOffset;
+        const rawCol = m.pointerToCol(x) - (draggedDesktopItem.grabOffsetCol || 0);
+        const rawRow = m.pointerToRow(y) - (draggedDesktopItem.grabOffsetRow || 0);
+        const col = Math.min(Math.max(0, m.maxCols - draggedDesktopItem.colSpan), Math.max(0, rawCol));
+        const row = Math.min(Math.max(0, m.maxRows - draggedDesktopItem.rowSpan), Math.max(0, rawRow));
+
+        let isValidDrop = true;
+        if (draggedDesktopItem.type === 'app') {
+          isValidDrop = !isCellOccupiedByActiveWidget(col, row);
+        } else if (draggedDesktopItem.type === 'widget') {
+          const plan = planWidgetDrop(draggedDesktopItem.id, col, row, m);
+          isValidDrop = plan.valid;
+        }
+        e.dataTransfer.dropEffect = isValidDrop ? 'move' : 'none';
+
         if (osGridHighlight) {
-          osGridHighlight.style.left = `${col * 100 + 24}px`;
-          osGridHighlight.style.top = `${row * 108 + 22}px`;
+          osGridHighlight.style.width = `${m.spanToWidth(draggedDesktopItem.colSpan)}px`;
+          osGridHighlight.style.height = `${m.spanToHeight(draggedDesktopItem.rowSpan)}px`;
+          osGridHighlight.style.borderRadius = draggedDesktopItem.type === 'widget' ? '18px' : '12px';
+          osGridHighlight.style.left = `${m.colToX(col) + 24}px`;
+          osGridHighlight.style.top = `${m.rowToY(row) + 22}px`;
+          osGridHighlight.classList.toggle('invalid', !isValidDrop);
           osGridHighlight.classList.remove('hidden');
         }
       });
@@ -1371,35 +1976,77 @@
       workspace.addEventListener('dragleave', (e) => {
         if (e.target === workspace && osGridHighlight) {
           osGridHighlight.classList.add('hidden');
+          osGridHighlight.classList.remove('invalid');
         }
       });
 
       workspace.addEventListener('drop', async (e) => {
-        if (!draggedDesktopAppId || !osDesktopIcons) return;
+        if (!draggedDesktopItem || !osDesktopIcons) return;
         e.preventDefault();
-        if (osGridHighlight) osGridHighlight.classList.add('hidden');
-        const rect = osDesktopIcons.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
-        const maxCols = Math.max(1, Math.floor(rect.width / 100));
-        const maxRows = Math.max(1, Math.floor(rect.height / 108));
-        const col = Math.min(maxCols - 1, Math.max(0, Math.floor(x / 100)));
-        const row = Math.min(maxRows - 1, Math.max(0, Math.floor(y / 108)));
-
-        const draggedApp = pinnedApps.find(a => a.id === draggedDesktopAppId);
-        if (!draggedApp) return;
-
-        const occupant = pinnedApps.find(a => a.id !== draggedApp.id && a.gridCol === col && a.gridRow === row);
-        if (occupant) {
-          occupant.gridCol = draggedApp.gridCol;
-          occupant.gridRow = draggedApp.gridRow;
+        if (osGridHighlight) {
+          osGridHighlight.classList.add('hidden');
+          osGridHighlight.classList.remove('invalid');
         }
-        draggedApp.gridCol = col;
-        draggedApp.gridRow = row;
+        const m = getDesktopGridMetrics();
+        const x = e.clientX - m.leftOffset;
+        const y = e.clientY - m.topOffset;
+        const rawCol = m.pointerToCol(x) - (draggedDesktopItem.grabOffsetCol || 0);
+        const rawRow = m.pointerToRow(y) - (draggedDesktopItem.grabOffsetRow || 0);
+        const col = Math.min(Math.max(0, m.maxCols - draggedDesktopItem.colSpan), Math.max(0, rawCol));
+        const row = Math.min(Math.max(0, m.maxRows - draggedDesktopItem.rowSpan), Math.max(0, rawRow));
 
-        renderDesktopApps();
-        if (window.oniAPI && window.oniAPI.setBookmarks) {
-          await window.oniAPI.setBookmarks(pinnedApps);
+        if (draggedDesktopItem.type === 'app') {
+          if (isCellOccupiedByActiveWidget(col, row)) return;
+          const draggedApp = pinnedApps.find(a => a.id === draggedDesktopItem.id);
+          if (!draggedApp) return;
+
+          const occupant = pinnedApps.find(a => a.id !== draggedApp.id && a.gridCol === col && a.gridRow === row);
+          if (occupant) {
+            occupant.gridCol = draggedApp.gridCol;
+            occupant.gridRow = draggedApp.gridRow;
+          }
+          draggedApp.gridCol = col;
+          draggedApp.gridRow = row;
+
+          renderDesktopApps(m);
+          if (window.oniAPI && window.oniAPI.setBookmarks) {
+            await window.oniAPI.setBookmarks(pinnedApps);
+          }
+        } else if (draggedDesktopItem.type === 'widget') {
+          const wid = draggedDesktopItem.id;
+          const plan = planWidgetDrop(wid, col, row, m);
+          if (!plan.valid) return;
+
+          Object.entries(plan.widgetMoves).forEach(([id, pos]) => {
+            desktopWidgetsConfig[id] = {
+              ...(desktopWidgetsConfig[id] || { enabled: true }),
+              enabled: true,
+              gridCol: pos.col,
+              gridRow: pos.row
+            };
+          });
+
+          let appsChanged = false;
+          if (plan.appMoves && plan.appMoves.length > 0) {
+            plan.appMoves.forEach(move => {
+              const targetApp = pinnedApps.find(a => a.id === move.id);
+              if (targetApp) {
+                targetApp.gridCol = move.col;
+                targetApp.gridRow = move.row;
+                appsChanged = true;
+              }
+            });
+          }
+
+          renderDesktopWidgets(m, false);
+          renderDesktopApps(m);
+
+          if (window.oniAPI && window.oniAPI.updateSettings) {
+            await window.oniAPI.updateSettings({ desktopWidgets: desktopWidgetsConfig });
+          }
+          if (appsChanged && window.oniAPI && window.oniAPI.setBookmarks) {
+            await window.oniAPI.setBookmarks(pinnedApps);
+          }
         }
       });
     }
@@ -1412,7 +2059,6 @@
       if (window.oniAPI && window.oniAPI.triggerOsAction) window.oniAPI.triggerOsAction('pin-app');
       else openOsWindow('os-win-add-app');
     });
-    document.getElementById('ctx-toggle-widgets')?.addEventListener('click', () => osWidgetsPanel?.classList.toggle('hidden'));
     document.getElementById('ctx-open-history')?.addEventListener('click', () => {
       if (window.oniAPI && window.oniAPI.triggerOsAction) window.oniAPI.triggerOsAction('history');
       else openOsWindow('os-win-history');
@@ -1421,7 +2067,10 @@
       if (window.oniAPI && window.oniAPI.triggerOsAction) window.oniAPI.triggerOsAction('settings');
       else openOsWindow('os-win-settings');
     });
-    document.getElementById('ctx-refresh-desktop')?.addEventListener('click', () => renderDesktopApps());
+    document.getElementById('ctx-refresh-desktop')?.addEventListener('click', () => {
+      renderDesktopApps();
+      renderDesktopWidgets();
+    });
 
     // Search Input Context Menu Actions
     if (osSpotlightInput) {
@@ -1680,18 +2329,51 @@
           window.oniAPI.onDesktopAppsUpdated(handlePinnedAppsUpdate);
         }
 
-        const [activeTheme, shieldStats] = await Promise.all([
+        const applySettingsState = (settings) => {
+          if (!settings) return;
+          if (settings.desktopWidgets) {
+            desktopWidgetsConfig = {
+              clock: { ...desktopWidgetsConfig.clock, ...(settings.desktopWidgets.clock || {}) },
+              search: { ...desktopWidgetsConfig.search, ...(settings.desktopWidgets.search || {}) },
+              shield: { ...desktopWidgetsConfig.shield, ...(settings.desktopWidgets.shield || {}) }
+            };
+          }
+          if (settings.searchEngine) {
+            const idx = ENGINES.findIndex(e => e.key === settings.searchEngine);
+            if (idx >= 0) {
+              currentEngineIndex = idx;
+              if (engineName) engineName.textContent = ENGINES[currentEngineIndex].name;
+              if (osWidgetEngineBtn) osWidgetEngineBtn.textContent = ENGINES[currentEngineIndex].name;
+            }
+          }
+          const m = getDesktopGridMetrics();
+          renderDesktopWidgets(m, true);
+          renderDesktopApps(m);
+        };
+
+        const [activeTheme, shieldStats, initialSettings] = await Promise.all([
           window.oniAPI.getActiveTheme ? window.oniAPI.getActiveTheme() : null,
-          window.oniAPI.getShieldStats ? window.oniAPI.getShieldStats() : null
+          window.oniAPI.getShieldStats ? window.oniAPI.getShieldStats() : null,
+          window.oniAPI.getSettings ? window.oniAPI.getSettings() : null
         ]);
+        if (initialSettings) {
+          applySettingsState(initialSettings);
+        }
         if (activeTheme) {
           const targetTheme = await resolveThemeForPage(activeTheme);
           applyNewTabTheme(targetTheme);
         }
         if (shieldStats) updateShieldTelemetry(shieldStats);
 
+        if (window.oniAPI.onSettingsUpdated) {
+          window.oniAPI.onSettingsUpdated((updatedSettings) => {
+            applySettingsState(updatedSettings);
+          });
+        }
+
         if (window.oniAPI.onThemeChanged) {
-          window.oniAPI.onThemeChanged(async ({ theme }) => {
+          window.oniAPI.onThemeChanged(async ({ theme, settings }) => {
+            if (settings) applySettingsState(settings);
             if (theme) {
               const targetTheme = await resolveThemeForPage(theme);
               applyNewTabTheme(targetTheme);
@@ -1720,6 +2402,12 @@
             }
           });
         }
+
+        window.addEventListener('resize', () => {
+          const m = getDesktopGridMetrics();
+          renderDesktopWidgets(m, false);
+          renderDesktopApps(m);
+        });
       } catch (e) {
         // Fallback
       }

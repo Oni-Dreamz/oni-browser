@@ -65,6 +65,11 @@ if (window.location.protocol === 'file:') {
     // Settings
     getSettings: () => ipcRenderer.invoke('settings:get'),
     updateSettings: (settings) => ipcRenderer.invoke('settings:update', settings),
+    onSettingsUpdated: (callback) => {
+      const handler = (event, settings) => callback(settings);
+      ipcRenderer.on('settings:updated', handler);
+      return () => ipcRenderer.removeListener('settings:updated', handler);
+    },
 
     // Themes & Customization
     getThemes: () => ipcRenderer.invoke('themes:getAll'),

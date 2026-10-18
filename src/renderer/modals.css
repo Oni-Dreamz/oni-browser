@@ -352,14 +352,16 @@ html, body {
   padding: 0 !important;
   overflow: hidden;
   display: flex;
-  min-height: 360px;
+  height: 68vh;
+  min-height: 440px;
   max-height: 68vh;
 }
 
 .os-settings-layout {
   display: flex;
   width: 100%;
-  min-height: 360px;
+  height: 100%;
+  min-height: 440px;
   max-height: 68vh;
   overflow: hidden;
 }

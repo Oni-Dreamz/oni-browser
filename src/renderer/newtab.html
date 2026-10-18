@@ -88,10 +88,10 @@
       </section>
       <div id="os-grid-highlight" class="os-grid-highlight hidden"></div>
 
-      <!-- Desktop Widgets Stack (Right side of Desktop) -->
+      <!-- Desktop Widgets Layer (Individual draggable widgets on the desktop grid) -->
       <aside class="os-widgets-panel" id="os-widgets-panel">
         <!-- Widget 1: Oni OS Clock & Kanji Telemetry -->
-        <div class="os-widget os-clock-widget">
+        <div class="os-widget os-clock-widget" id="os-widget-clock" data-widget-id="clock" draggable="true">
           <div class="os-widget-header">
             <span class="os-widget-tag">SYSTEM TIME // TOKYO-STD</span>
             <span class="os-status-dot online"></span>
@@ -106,7 +106,7 @@
         </div>
 
         <!-- Widget 2: Desktop Quick Search / Command Bar -->
-        <div class="os-widget os-search-widget">
+        <div class="os-widget os-search-widget" id="os-widget-search" data-widget-id="search" draggable="true">
           <div class="os-widget-header">
             <span class="os-widget-tag">QUICK COMMAND // WEB & APPS</span>
             <button type="button" class="os-engine-chip" id="os-widget-engine-btn" title="Switch Search Engine">Google</button>
@@ -118,7 +118,7 @@
         </div>
 
         <!-- Widget 3: Oni Shield Firewall & System Telemetry -->
-        <div class="os-widget os-shield-widget">
+        <div class="os-widget os-shield-widget" id="os-widget-shield" data-widget-id="shield" draggable="true">
           <div class="os-widget-header">
             <span class="os-widget-tag">ONI SHIELD // FIREWALL</span>
             <span class="os-shield-state" id="os-widget-shield-state">PROTECTED</span>
@@ -279,7 +279,6 @@
       <div class="os-context-menu hidden" id="os-context-menu">
         <button class="os-ctx-item" id="ctx-open-spotlight">🔍 Open Search</button>
         <button class="os-ctx-item" id="ctx-add-app">＋ Pin New App</button>
-        <button class="os-ctx-item" id="ctx-toggle-widgets">◧ Toggle Widgets</button>
         <div class="os-ctx-sep"></div>
         <button class="os-ctx-item" id="ctx-open-history">⏱ Open History</button>
         <button class="os-ctx-item" id="ctx-open-settings">⚙ Open Settings</button>

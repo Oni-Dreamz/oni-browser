@@ -1163,7 +1163,16 @@ ipcMain.handle('downloads:openFolder', (event, filePath) => {
 
 // Settings IPC
 ipcMain.handle('settings:get', () => store.getSettings());
-ipcMain.handle('settings:update', (event, newSettings) => store.updateSettings(newSettings));
+ipcMain.handle('settings:update', (event, newSettings) => {
+  const updated = store.updateSettings(newSettings);
+  sendToChromeAndDock('settings:updated', updated);
+  for (const [, tab] of tabs.entries()) {
+    if (tab.url && tab.url.startsWith('oni://') && !tab.view.webContents.isDestroyed()) {
+      tab.view.webContents.send('settings:updated', updated);
+    }
+  }
+  return updated;
+});
 
 // Themes IPC
 function broadcastThemeChange(payload) {

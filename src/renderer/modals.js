@@ -623,6 +623,43 @@
       `;
     });
 
+    const widgetsCfg = (settings && settings.desktopWidgets) || {};
+    const widgetDefs = [
+      {
+        id: 'clock',
+        title: 'System Time // Tokyo-STD',
+        desc: 'Live digital clock, Kanji date telemetry, and active session status',
+        enabled: !widgetsCfg.clock || widgetsCfg.clock.enabled !== false
+      },
+      {
+        id: 'search',
+        title: 'Quick Command // Web & Apps',
+        desc: 'Desktop quick search bar with instant search engine switcher',
+        enabled: !widgetsCfg.search || widgetsCfg.search.enabled !== false
+      },
+      {
+        id: 'shield',
+        title: 'Oni Shield // Firewall',
+        desc: 'Real-time tracker neutralization and Chromium kernel telemetry',
+        enabled: !widgetsCfg.shield || widgetsCfg.shield.enabled !== false
+      }
+    ];
+
+    let widgetsHtml = '';
+    widgetDefs.forEach(w => {
+      widgetsHtml += `
+        <div class="os-list-row" style="cursor:default; margin-bottom:0; ${w.enabled ? 'border-color:rgba(var(--accent-rgb),0.3); background:rgba(var(--accent-rgb),0.06);' : ''}">
+          <div>
+            <div style="font-weight:600; color:#fff;">${w.title}</div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">${w.desc}</div>
+          </div>
+          <button type="button" class="${w.enabled ? 'os-btn-danger' : 'os-btn-primary'} os-widget-toggle-btn" data-widget-id="${w.id}" style="padding:5px 14px; font-size:11px; flex-shrink:0;">
+            ${w.enabled ? 'Remove' : 'Add to Home'}
+          </button>
+        </div>
+      `;
+    });
+
     const html = `
       <div class="os-settings-layout">
         <aside class="os-settings-sidebar" aria-label="Settings Navigation">
@@ -640,6 +677,15 @@
               <polyline points="2 12 12 17 22 12"></polyline>
             </svg>
             <span>Customization</span>
+          </button>
+          <button type="button" class="os-settings-nav-item ${activeSettingsSection === 'widgets' ? 'active' : ''}" data-section="widgets">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="7" height="7" rx="1"></rect>
+              <rect x="14" y="3" width="7" height="7" rx="1"></rect>
+              <rect x="14" y="14" width="7" height="7" rx="1"></rect>
+              <rect x="3" y="14" width="7" height="7" rx="1"></rect>
+            </svg>
+            <span>Widgets</span>
           </button>
           <button type="button" class="os-settings-nav-item ${activeSettingsSection === 'privacy' ? 'active' : ''}" data-section="privacy">
             <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -664,35 +710,49 @@
             </div>
           </div>
 
-          <!-- Section 2: Customization -->
+          <!-- Section 2: Customization (Order: Theme -> Accent Color -> Wallpaper) -->
           <div class="os-settings-section ${activeSettingsSection === 'customization' ? '' : 'hidden'}" data-section-panel="customization">
             <div class="os-settings-section-header">
               <div class="os-settings-section-title">Customization</div>
-              <div class="os-settings-section-desc">Personalize your Oni Browser theme, wallpaper, and global accent color.</div>
+              <div class="os-settings-section-desc">Personalize your Oni Browser theme, global accent color, and wallpaper.</div>
             </div>
             <div style="margin-bottom: 18px;">
-              <div class="os-settings-group-label">Themes</div>
+              <div class="os-settings-group-label">Theme</div>
               <div style="display:flex; flex-direction:column; gap:8px;">
                 ${themesHtml}
               </div>
             </div>
 
             <div style="margin-bottom: 18px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.08);">
-              <div class="os-settings-group-label">Wallpaper</div>
-              <div class="os-wallpaper-grid">
-                ${wallpapersHtml}
-              </div>
-            </div>
-
-            <div style="padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.08);">
               <div class="os-settings-group-label">Accent Color</div>
               <div class="os-accent-grid">
                 ${accentColorsHtml}
               </div>
             </div>
+
+            <div style="padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.08);">
+              <div class="os-settings-group-label">Wallpaper</div>
+              <div class="os-wallpaper-grid">
+                ${wallpapersHtml}
+              </div>
+            </div>
           </div>
 
-          <!-- Section 3: Privacy and Data -->
+          <!-- Section 3: Widgets -->
+          <div class="os-settings-section ${activeSettingsSection === 'widgets' ? '' : 'hidden'}" data-section-panel="widgets">
+            <div class="os-settings-section-header">
+              <div class="os-settings-section-title">Widgets</div>
+              <div class="os-settings-section-desc">Select which desktop widgets are displayed on your Oni OS home page. Drag widgets on the home page to rearrange them on the grid.</div>
+            </div>
+            <div>
+              <div class="os-settings-group-label">Home Page Widgets</div>
+              <div style="display:flex; flex-direction:column; gap:8px;">
+                ${widgetsHtml}
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 4: Privacy and Data -->
           <div class="os-settings-section ${activeSettingsSection === 'privacy' ? '' : 'hidden'}" data-section-panel="privacy">
             <div class="os-settings-section-header">
               <div class="os-settings-section-title">Privacy and Data</div>
@@ -796,6 +856,24 @@
         }
       });
     }
+
+    // Widget Add to Home / Remove actions
+    settingsBody.querySelectorAll('.os-widget-toggle-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const wid = btn.dataset.widgetId;
+        if (wid && window.oniAPI && window.oniAPI.updateSettings) {
+          const cur = (settings && settings.desktopWidgets && settings.desktopWidgets[wid]) || { enabled: true };
+          const nextEnabled = cur.enabled === false;
+          await window.oniAPI.updateSettings({
+            desktopWidgets: {
+              ...widgetsCfg,
+              [wid]: { enabled: nextEnabled, gridCol: null, gridRow: null }
+            }
+          });
+          renderOsSettingsWindow();
+        }
+      });
+    });
 
     settingsBody.querySelectorAll('.os-engine-choice').forEach(btn => {
       btn.addEventListener('click', async () => {
