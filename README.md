@@ -14,40 +14,18 @@
 
 ## ⛩️ The Oni OS Experience
 
-```
-  ┌────────────────────────────────────────────────────────────────────────┐
-  │ 鬼 ONI OS ─── Home Desktop  │  [ Search Omnibox ]  │  📶 🛡️ 🔊  12:00  │
-  ├────────────────────────────────────────────────────────────────────────┤
-  │                                                                        │
-  │   [ 12:00:00 - 水曜日 ]          ┌─── SYSTEM STATS ──────────────┐   │
-  │   Tokyo Cyberpunk Canvas         │ CPU: 12%  │ RAM: 3.4GB / 32GB │   │
-  │                                  │ SHIELD: 4,821 BLOCKED         │   │
-  │   [ Desktop Widgets Grid ]       └───────────────────────────────┘   │
-  │   • Google / DDG Omnibox         ┌─── FLOATING OS WINDOW ────────┐   │
-  │   • Notes Scratchpad             │  [x] System Settings          │   │
-  │   • Weather Telemetry            │  • SYSTEM UPDATES: v1.0.0     │   │
-  │   • Pinned Apps Grid             │  • Themes: Oni OS / Classic   │   │
-  │                                  └───────────────────────────────┘   │
-  │                                                                        │
-  │       [ 鬼 ] [ 🌐 ] [ 🕒 ] [ ⭐ ] [ ⬇️ ] [ 📝 ] [ 🖩 ] [ ⚙️ ]         │
-  │       └─────── Floating Glass Dock with Live Badges ────────┘         │
-  └────────────────────────────────────────────────────────────────────────┘
-```
-
-The flagship layout of the browser is **Oni OS Mode**, turning your web workspace into a futuristic, distraction-free command deck:
+The flagship layout of the browser is **Oni OS**, turning your web workspace into a futuristic, distraction-free command deck:
 
 ### 1. 🛸 Floating Interactive Glass App Dock
-- **macOS & Cyberpunk Glass Aesthetics**: Translucent, frosted backdrop with dynamic hover magnification, smooth spring animations, and glow halos.
+- **Cyberpunk Glass Aesthetics**: Translucent, frosted backdrop with dynamic hover magnification, smooth spring animations, and glow halos.
 - **Quick-Launch Applications**:
   - **Start Menu / App Launcher (鬼)**: Searchable launcher for web apps and shortcuts.
   - **Browser Mode**: Instant switch between active web browsing and the OS Desktop.
   - **History Manager**: Timeline of previous sessions.
-  - **Bookmarks / Pinned Apps**: Grid of saved web portals and apps.
-  - **Downloads Center**: Active download counter badge with real-time progress.
-  - **Notes Scratchpad**: Persistent floating notepad for fast note-taking.
-  - **Retro Calculator**: Quick cyberpunk calculator tool.
+  - **Pinned Apps**: Grid of saved web portals and apps.
+  - **Downloads Center**: Active download with real-time progress.
   - **System Settings**: Control center for updates, theme constructs, search engines, and privacy.
-  - **Global Audio Mute & Dock Hide Toggle**: One-click mute for active tabs and dock auto-collapse.
+  - **Dock Hide Toggle**: One-click dock auto-collapse.
 
 ### 2. 🪟 Layered Floating OS Modals (`modalsView`)
 - Rendered on a dedicated, transparent `WebContentsView` layer, ensuring popups, menus, and utilities never compromise tab performance or web page frames.
@@ -57,15 +35,14 @@ The flagship layout of the browser is **Oni OS Mode**, turning your web workspac
   - **History Window**: Timestamped, searchable domain history with batch wipe.
   - **Bookmarks Window**: Custom grid of your pinned daily sites.
   - **Downloads Window**: Live transfer speeds, byte counters, progress bars, pause/cancel, and folder reveals.
-  - **Notes & Calculator Windows**: Independent productivity tools.
 
 ### 3. 🖥️ Modular Desktop Workspace (`newtab.html`)
 - **Atmospheric Cyberpunk Tokyo Canvas**: High-resolution wallpaper engine with support for custom image uploads.
 - **Interactive Home Widgets**:
-  - **Digital Clock & Japanese Kanji Date**: Live time with date format toggle.
+  - **Digital Clock & Japanese Kanji Date**: Live time with date.
   - **Multi-Engine Omnibox**: Instant queries via Google, DuckDuckGo, Brave Search, or Bing.
-  - **System Resource Telemetry**: Real-time simulated CPU, memory, and Oni Shield blocker telemetry.
-  - **Quick Notes & Weather**: Embedded desktop glance widgets.
+  - **System Telemetry**: Oni Shield blocker telemetry.
+  - **Widgets**: Embedded desktop glance widgets.
   - **Customizable App Grid**: Drag-and-drop tiles for daily quick-launches.
 
 ### 4. 🔄 Dynamic GitHub Auto-Updates (`electron-updater`)
