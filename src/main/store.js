@@ -1,6 +1,41 @@
 const { app } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { pathToFileURL } = require('url');
+
+const DEFAULT_WALLPAPER_URL = '../../assets/wallpaper.jpg';
+
+const ACCENT_COLORS = [
+  { id: 'emerald', name: 'Emerald', hex: '#00ff88', rgb: '0, 255, 136', hover: '#33ff9f', dark: '#00994d' },
+  { id: 'crimson', name: 'Crimson', hex: '#ff2a5f', rgb: '255, 42, 95', hover: '#ff5c85', dark: '#b8143d' },
+  { id: 'cyan', name: 'Cyber Cyan', hex: '#00e5ff', rgb: '0, 229, 255', hover: '#4df0ff', dark: '#008fa3' },
+  { id: 'violet', name: 'Amethyst', hex: '#a855f7', rgb: '168, 85, 247', hover: '#c084fc', dark: '#7e22ce' },
+  { id: 'amber', name: 'Solar Gold', hex: '#f59e0b', rgb: '245, 158, 11', hover: '#fbbf24', dark: '#b45309' },
+  { id: 'rose', name: 'Sakura', hex: '#ff4d94', rgb: '255, 77, 148', hover: '#ff80b3', dark: '#be185d' },
+  { id: 'blue', name: 'Cobalt', hex: '#3b82f6', rgb: '59, 130, 246', hover: '#60a5fa', dark: '#1d4ed8' }
+];
+
+const LEGACY_DEFAULT_PIN_URLS = new Set([
+  'https://github.com',
+  'https://youtube.com',
+  'https://reddit.com',
+  'https://wikipedia.org',
+  'https://twitch.tv',
+  'https://news.ycombinator.com',
+  'https://chatgpt.com',
+  'https://claude.ai'
+]);
+
+const LEGACY_DEFAULT_PIN_IDS = new Set([
+  'pin_github',
+  'pin_youtube',
+  'pin_reddit',
+  'pin_wikipedia',
+  'pin_twitch',
+  'pin_hn',
+  'pin_chatgpt',
+  'pin_claude'
+]);
 
 const CLASSIC_THEME = {
   id: 'classic',
@@ -22,8 +57,10 @@ const CLASSIC_THEME = {
       '--bg-surface-hover': '#1e2233',
       '--bg-surface-active': '#252b40',
       '--accent-green': '#00ff88',
+      '--accent-rgb': '0, 255, 136',
       '--accent-green-hover': '#33ff9f',
       '--accent-green-glow': 'rgba(0, 255, 136, 0.35)',
+      '--accent-glow': 'rgba(0, 255, 136, 0.4)',
       '--accent-green-dark': '#00994d',
       '--accent-violet': '#8b5cf6',
       '--accent-cyan': '#00e5ff',
@@ -70,8 +107,11 @@ const CLASSIC_THEME = {
     cssVariables: {
       '--bg-dark': '#08090d',
       '--accent-green': '#00ff88',
+      '--accent-rgb': '0, 255, 136',
       '--accent-green-hover': '#33ff9f',
+      '--accent-green-dark': '#00994d',
       '--accent-glow': 'rgba(0, 255, 136, 0.4)',
+      '--accent-green-glow': 'rgba(0, 255, 136, 0.35)',
       '--accent-cyan': '#00e5ff',
       '--accent-violet': '#8b5cf6',
       '--text-main': '#f8fafc',
@@ -82,7 +122,7 @@ const CLASSIC_THEME = {
       '--font-mono': "'JetBrains Mono', monospace"
     },
     wallpaper: {
-      image: '../../assets/wallpaper.jpg',
+      image: DEFAULT_WALLPAPER_URL,
       brightness: 0.65,
       saturate: 1.15,
       hoverZoom: true,
@@ -116,16 +156,7 @@ const CLASSIC_THEME = {
     },
     shortcuts: {
       visible: true,
-      items: [
-        { title: 'GitHub', url: 'https://github.com', icon: 'https://github.githubassets.com/favicons/favicon.png' },
-        { title: 'YouTube', url: 'https://youtube.com', icon: 'https://www.youtube.com/s/desktop/f7125368/img/favicon_144x144.png' },
-        { title: 'Reddit', url: 'https://reddit.com', icon: 'https://www.redditstatic.com/shreddit/assets/favicon/192x192.png' },
-        { title: 'Wikipedia', url: 'https://wikipedia.org', icon: 'https://en.wikipedia.org/static/favicon/wikipedia.ico' },
-        { title: 'Twitch', url: 'https://twitch.tv', icon: 'https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png' },
-        { title: 'Hacker News', url: 'https://news.ycombinator.com', icon: 'https://news.ycombinator.com/favicon.ico' },
-        { title: 'ChatGPT', url: 'https://chatgpt.com', icon: 'https://oaistatic-cdn.azureedge.net/chatgpt/favicon.ico' },
-        { title: 'Claude', url: 'https://claude.ai', icon: 'https://claude.ai/favicon.ico' }
-      ]
+      items: []
     },
     footer: {
       visible: true,
@@ -167,8 +198,10 @@ const ONI_OS_THEME = {
       '--bg-surface-hover': '#192034',
       '--bg-surface-active': '#222b45',
       '--accent-green': '#00ff88',
+      '--accent-rgb': '0, 255, 136',
       '--accent-green-hover': '#33ff9f',
       '--accent-green-glow': 'rgba(0, 255, 136, 0.38)',
+      '--accent-glow': 'rgba(0, 255, 136, 0.4)',
       '--accent-green-dark': '#00994d',
       '--accent-violet': '#8b5cf6',
       '--accent-cyan': '#00e5ff',
@@ -228,8 +261,11 @@ const ONI_OS_THEME = {
     cssVariables: {
       '--bg-dark': '#05070b',
       '--accent-green': '#00ff88',
+      '--accent-rgb': '0, 255, 136',
       '--accent-green-hover': '#33ff9f',
+      '--accent-green-dark': '#00994d',
       '--accent-glow': 'rgba(0, 255, 136, 0.4)',
+      '--accent-green-glow': 'rgba(0, 255, 136, 0.38)',
       '--accent-cyan': '#00e5ff',
       '--accent-violet': '#8b5cf6',
       '--text-main': '#f8fafc',
@@ -240,7 +276,7 @@ const ONI_OS_THEME = {
       '--font-mono': "'JetBrains Mono', monospace"
     },
     wallpaper: {
-      image: '../../assets/wallpaper.jpg',
+      image: DEFAULT_WALLPAPER_URL,
       brightness: 0.58,
       saturate: 1.25,
       hoverZoom: false,
@@ -280,16 +316,7 @@ const ONI_OS_THEME = {
     },
     shortcuts: {
       visible: true,
-      items: [
-        { title: 'GitHub', url: 'https://github.com', icon: 'https://github.githubassets.com/favicons/favicon.png' },
-        { title: 'YouTube', url: 'https://youtube.com', icon: 'https://www.youtube.com/s/desktop/f7125368/img/favicon_144x144.png' },
-        { title: 'Reddit', url: 'https://reddit.com', icon: 'https://www.redditstatic.com/shreddit/assets/favicon/192x192.png' },
-        { title: 'Wikipedia', url: 'https://wikipedia.org', icon: 'https://en.wikipedia.org/static/favicon/wikipedia.ico' },
-        { title: 'Twitch', url: 'https://twitch.tv', icon: 'https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png' },
-        { title: 'Hacker News', url: 'https://news.ycombinator.com', icon: 'https://news.ycombinator.com/favicon.ico' },
-        { title: 'ChatGPT', url: 'https://chatgpt.com', icon: 'https://oaistatic-cdn.azureedge.net/chatgpt/favicon.ico' },
-        { title: 'Claude', url: 'https://claude.ai', icon: 'https://claude.ai/favicon.ico' }
-      ]
+      items: []
     },
     footer: {
       visible: true,
@@ -341,38 +368,78 @@ class Store {
     return cloneDeep(ONI_OS_THEME);
   }
 
+  getAccentColors() {
+    return cloneDeep(ACCENT_COLORS);
+  }
+
   getDefaultPinnedApps() {
-    const list = [
-      { id: 'pin_github', title: 'GitHub', url: 'https://github.com', icon: 'https://github.githubassets.com/favicons/favicon.png', favicon: 'https://github.githubassets.com/favicons/favicon.png', createdAt: 1729036800000 },
-      { id: 'pin_youtube', title: 'YouTube', url: 'https://youtube.com', icon: 'https://www.youtube.com/s/desktop/f7125368/img/favicon_144x144.png', favicon: 'https://www.youtube.com/s/desktop/f7125368/img/favicon_144x144.png', createdAt: 1729036800000 },
-      { id: 'pin_reddit', title: 'Reddit', url: 'https://reddit.com', icon: 'https://www.redditstatic.com/shreddit/assets/favicon/192x192.png', favicon: 'https://www.redditstatic.com/shreddit/assets/favicon/192x192.png', createdAt: 1729036800000 },
-      { id: 'pin_wikipedia', title: 'Wikipedia', url: 'https://wikipedia.org', icon: 'https://en.wikipedia.org/static/favicon/wikipedia.ico', favicon: 'https://en.wikipedia.org/static/favicon/wikipedia.ico', createdAt: 1729036800000 },
-      { id: 'pin_twitch', title: 'Twitch', url: 'https://twitch.tv', icon: 'https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png', favicon: 'https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png', createdAt: 1729036800000 },
-      { id: 'pin_hn', title: 'Hacker News', url: 'https://news.ycombinator.com', icon: 'https://news.ycombinator.com/favicon.ico', favicon: 'https://news.ycombinator.com/favicon.ico', createdAt: 1729036800000 },
-      { id: 'pin_chatgpt', title: 'ChatGPT', url: 'https://chatgpt.com', icon: 'https://oaistatic-cdn.azureedge.net/chatgpt/favicon.ico', favicon: 'https://oaistatic-cdn.azureedge.net/chatgpt/favicon.ico', createdAt: 1729036800000 },
-      { id: 'pin_claude', title: 'Claude', url: 'https://claude.ai', icon: 'https://claude.ai/favicon.ico', favicon: 'https://claude.ai/favicon.ico', createdAt: 1729036800000 }
-    ];
-    return list.map((p, idx) => ({
-      ...p,
-      gridCol: Math.floor(idx / 6),
-      gridRow: idx % 6
-    }));
+    return [];
+  }
+
+  applyAccentAndWallpaperToThemes(themes, settings) {
+    if (!Array.isArray(themes) || !settings) return;
+    const accentId = settings.accentColor || 'emerald';
+    const accent = ACCENT_COLORS.find(c => c.id === accentId) || ACCENT_COLORS[0];
+    const activeWallpaper = settings.activeWallpaper || DEFAULT_WALLPAPER_URL;
+
+    themes.forEach(t => {
+      if (!t.chrome) t.chrome = { cssVariables: {}, layout: {} };
+      if (!t.chrome.cssVariables) t.chrome.cssVariables = {};
+      t.chrome.cssVariables['--accent-green'] = accent.hex;
+      t.chrome.cssVariables['--accent-emerald'] = accent.hex;
+      t.chrome.cssVariables['--accent-rgb'] = accent.rgb;
+      t.chrome.cssVariables['--accent-green-hover'] = accent.hover;
+      t.chrome.cssVariables['--accent-green-dark'] = accent.dark;
+      t.chrome.cssVariables['--accent-green-glow'] = `rgba(${accent.rgb}, 0.38)`;
+      t.chrome.cssVariables['--accent-glow'] = `rgba(${accent.rgb}, 0.4)`;
+      t.chrome.cssVariables['--border-focus'] = `rgba(${accent.rgb}, 0.65)`;
+      if (t.id === 'oni-os') {
+        t.chrome.cssVariables['--bg-tab-active'] = `rgba(${accent.rgb}, 0.12)`;
+        t.chrome.cssVariables['--border-subtle'] = `rgba(${accent.rgb}, 0.12)`;
+      }
+
+      if (!t.newTab) t.newTab = { cssVariables: {}, wallpaper: {} };
+      if (!t.newTab.cssVariables) t.newTab.cssVariables = {};
+      t.newTab.cssVariables['--accent-green'] = accent.hex;
+      t.newTab.cssVariables['--accent-emerald'] = accent.hex;
+      t.newTab.cssVariables['--accent-rgb'] = accent.rgb;
+      t.newTab.cssVariables['--accent-green-hover'] = accent.hover;
+      t.newTab.cssVariables['--accent-green-dark'] = accent.dark;
+      t.newTab.cssVariables['--accent-glow'] = `rgba(${accent.rgb}, 0.4)`;
+      t.newTab.cssVariables['--accent-green-glow'] = `rgba(${accent.rgb}, 0.38)`;
+      if (t.id === 'oni-os') {
+        t.newTab.cssVariables['--glass-border'] = `rgba(${accent.rgb}, 0.18)`;
+      }
+
+      if (!t.newTab.wallpaper) t.newTab.wallpaper = {};
+      t.newTab.wallpaper.image = activeWallpaper;
+      if (t.id === 'oni-os') {
+        t.newTab.wallpaper.overlayGradient = `radial-gradient(circle at 18% 22%, rgba(${accent.rgb}, 0.1) 0%, transparent 45%), radial-gradient(circle at 82% 78%, rgba(0, 229, 255, 0.1) 0%, transparent 45%), linear-gradient(180deg, rgba(4, 6, 10, 0.35) 0%, rgba(4, 6, 10, 0.8) 100%)`;
+      }
+    });
   }
 
   getDefaultData() {
-    const pins = this.getDefaultPinnedApps();
+    const pins = [];
+    const settings = {
+      searchEngine: 'google', // 'google' | 'duckduckgo' | 'bing' | 'brave'
+      homeUrl: 'oni://home',
+      showBookmarksBar: false,
+      theme: 'oni-os',
+      activeThemeId: 'oni-os',
+      accentColor: 'emerald',
+      activeWallpaper: DEFAULT_WALLPAPER_URL,
+      customWallpapers: [],
+      defaultPinsCleared_v2: true,
+      adBlockEnabled: true,
+      hardwareAcceleration: true,
+      restoreLastSession: false
+    };
+    const themes = [cloneDeep(ONI_OS_THEME), cloneDeep(CLASSIC_THEME)];
+    this.applyAccentAndWallpaperToThemes(themes, settings);
     return {
-      settings: {
-        searchEngine: 'google', // 'google' | 'duckduckgo' | 'bing' | 'brave'
-        homeUrl: 'oni://home',
-        showBookmarksBar: false,
-        theme: 'oni-os',
-        activeThemeId: 'oni-os',
-        adBlockEnabled: true,
-        hardwareAcceleration: true,
-        restoreLastSession: false
-      },
-      themes: [cloneDeep(ONI_OS_THEME), cloneDeep(CLASSIC_THEME)],
+      settings,
+      themes,
       bookmarks: pins,
       desktopApps: pins,
       history: [],
@@ -386,7 +453,16 @@ class Store {
       if (fs.existsSync(this.filePath)) {
         const raw = fs.readFileSync(this.filePath, 'utf-8');
         const parsed = JSON.parse(raw);
-        const mergedSettings = { ...defaults.settings, ...(parsed.settings || {}), searchEngine: 'google' };
+        const mergedSettings = {
+          ...defaults.settings,
+          ...(parsed.settings || {}),
+          searchEngine: (parsed.settings && parsed.settings.searchEngine) || 'google',
+          accentColor: (parsed.settings && parsed.settings.accentColor) || 'emerald',
+          activeWallpaper: (parsed.settings && parsed.settings.activeWallpaper) || DEFAULT_WALLPAPER_URL,
+          customWallpapers: Array.isArray(parsed.settings && parsed.settings.customWallpapers)
+            ? parsed.settings.customWallpapers
+            : []
+        };
 
         // Ensure themes array exists and includes both Oni OS and Classic themes
         let themes = Array.isArray(parsed.themes) && parsed.themes.length > 0
@@ -397,13 +473,12 @@ class Store {
         if (oniOsIdx === -1) {
           themes.unshift(cloneDeep(ONI_OS_THEME));
         } else {
-          // Ensure built-in Oni OS has latest constructs and Google default engine
           themes[oniOsIdx] = {
             ...cloneDeep(ONI_OS_THEME),
             ...themes[oniOsIdx],
-            chrome: ONI_OS_THEME.chrome,
-            newTab: { ...ONI_OS_THEME.newTab, ...(themes[oniOsIdx].newTab || {}), layoutMode: 'desktop' },
-            behavior: { ...ONI_OS_THEME.behavior, ...(themes[oniOsIdx].behavior || {}), searchEngine: 'google' }
+            chrome: cloneDeep(ONI_OS_THEME.chrome),
+            newTab: { ...cloneDeep(ONI_OS_THEME.newTab), ...(themes[oniOsIdx].newTab || {}), layoutMode: 'desktop' },
+            behavior: { ...ONI_OS_THEME.behavior, ...(themes[oniOsIdx].behavior || {}), searchEngine: mergedSettings.searchEngine }
           };
         }
 
@@ -411,7 +486,9 @@ class Store {
         if (classicIdx === -1) {
           themes.push(cloneDeep(CLASSIC_THEME));
         } else {
-          themes[classicIdx].behavior = { ...(themes[classicIdx].behavior || {}), searchEngine: 'google' };
+          themes[classicIdx].chrome = cloneDeep(CLASSIC_THEME.chrome);
+          themes[classicIdx].newTab = { ...cloneDeep(CLASSIC_THEME.newTab), ...(themes[classicIdx].newTab || {}) };
+          themes[classicIdx].behavior = { ...(themes[classicIdx].behavior || {}), searchEngine: mergedSettings.searchEngine };
         }
 
         // Ensure Oni OS is strictly top/first in themes array
@@ -434,7 +511,7 @@ class Store {
           });
         }
         if (Array.isArray(parsed.bookmarks)) {
-          parsed.bookmarks.forEach((b, idx) => {
+          parsed.bookmarks.forEach((b) => {
             if (b.gridCol !== undefined && b.gridRow !== undefined) {
               const coords = { gridCol: Number(b.gridCol), gridRow: Number(b.gridRow) };
               if (b.id) gridCoords.set(b.id, coords);
@@ -444,6 +521,9 @@ class Store {
           });
         }
 
+        const shouldStripLegacyDefaults = !(parsed.settings && parsed.settings.defaultPinsCleared_v2);
+        mergedSettings.defaultPinsCleared_v2 = true;
+
         // Unify Pinned Apps (single source of truth for both Home Page & Start Menu)
         let unifiedPins = [];
         const seenUrls = new Set();
@@ -451,6 +531,11 @@ class Store {
           if (!p || !p.url || p.url.startsWith('oni://')) return;
           const norm = normalizePinUrl(p.url);
           if (!norm || seenUrls.has(norm)) return;
+          if (shouldStripLegacyDefaults) {
+            if (LEGACY_DEFAULT_PIN_IDS.has(p.id) || LEGACY_DEFAULT_PIN_URLS.has(norm) || p.createdAt === 1729036800000) {
+              return;
+            }
+          }
           seenUrls.add(norm);
           const iconUrl = p.icon || p.favicon || '';
           const existingCoords = (p.id && gridCoords.get(p.id)) || gridCoords.get(norm);
@@ -473,20 +558,12 @@ class Store {
           });
         };
 
-        // Priority: existing bookmarks, then desktopApps, then theme shortcuts
+        // Only load user-created bookmarks/desktopApps (never seed from theme defaults)
         if (Array.isArray(parsed.bookmarks)) {
           parsed.bookmarks.forEach(addPinCandidate);
         }
         if (Array.isArray(parsed.desktopApps)) {
           parsed.desktopApps.forEach(addPinCandidate);
-        }
-        themes.forEach(t => {
-          if (t.newTab && t.newTab.shortcuts && Array.isArray(t.newTab.shortcuts.items)) {
-            t.newTab.shortcuts.items.forEach(addPinCandidate);
-          }
-        });
-        if (unifiedPins.length === 0) {
-          unifiedPins = this.getDefaultPinnedApps();
         }
 
         // Assign free grid slots to any apps missing coordinates
@@ -542,6 +619,9 @@ class Store {
           mergedSettings.activeThemeId = 'oni-os';
           mergedSettings.theme = 'oni-os';
         }
+
+        // Apply active Accent Color and Wallpaper across all themes
+        this.applyAccentAndWallpaperToThemes(themes, mergedSettings);
 
         const data = {
           ...defaults,
@@ -610,8 +690,86 @@ class Store {
         if (classicTheme.chrome && classicTheme.chrome.layout) classicTheme.chrome.layout.showBookmarksBar = newSettings.showBookmarksBar;
       }
     }
+    this.applyAccentAndWallpaperToThemes(this.data.themes, this.data.settings);
     this.saveData();
     return this.data.settings;
+  }
+
+  setAccentColor(colorId) {
+    const valid = ACCENT_COLORS.find(c => c.id === colorId) || ACCENT_COLORS[0];
+    this.data.settings.accentColor = valid.id;
+    this.applyAccentAndWallpaperToThemes(this.data.themes, this.data.settings);
+    this.saveData();
+    return {
+      theme: this.getActiveTheme(),
+      settings: this.data.settings
+    };
+  }
+
+  setWallpaper(wallpaperUrl) {
+    this.data.settings.activeWallpaper = wallpaperUrl || DEFAULT_WALLPAPER_URL;
+    this.applyAccentAndWallpaperToThemes(this.data.themes, this.data.settings);
+    this.saveData();
+    return {
+      theme: this.getActiveTheme(),
+      settings: this.data.settings
+    };
+  }
+
+  addCustomWallpaper(sourceFilePath) {
+    if (!sourceFilePath || !fs.existsSync(sourceFilePath)) {
+      return { theme: this.getActiveTheme(), settings: this.data.settings };
+    }
+    const wallpapersDir = path.join(this.userDataPath, 'wallpapers');
+    fs.mkdirSync(wallpapersDir, { recursive: true });
+    const ext = path.extname(sourceFilePath) || '.jpg';
+    const baseName = path.basename(sourceFilePath, ext);
+    const destFilename = `wp_${Date.now()}${ext}`;
+    const destPath = path.join(wallpapersDir, destFilename);
+    fs.copyFileSync(sourceFilePath, destPath);
+
+    const fileUrl = pathToFileURL(destPath).href;
+    const wpEntry = {
+      id: `wp_${Date.now()}`,
+      name: baseName,
+      url: fileUrl,
+      filePath: destPath
+    };
+
+    if (!Array.isArray(this.data.settings.customWallpapers)) {
+      this.data.settings.customWallpapers = [];
+    }
+    this.data.settings.customWallpapers.push(wpEntry);
+    this.data.settings.activeWallpaper = fileUrl;
+    this.applyAccentAndWallpaperToThemes(this.data.themes, this.data.settings);
+    this.saveData();
+    return {
+      theme: this.getActiveTheme(),
+      settings: this.data.settings,
+      wallpaper: wpEntry
+    };
+  }
+
+  removeCustomWallpaper(idOrUrl) {
+    if (!Array.isArray(this.data.settings.customWallpapers)) {
+      return { theme: this.getActiveTheme(), settings: this.data.settings };
+    }
+    const target = this.data.settings.customWallpapers.find(w => w.id === idOrUrl || w.url === idOrUrl);
+    this.data.settings.customWallpapers = this.data.settings.customWallpapers.filter(w => w.id !== idOrUrl && w.url !== idOrUrl);
+    if (target && target.filePath && fs.existsSync(target.filePath)) {
+      try {
+        fs.unlinkSync(target.filePath);
+      } catch (e) {}
+    }
+    if (this.data.settings.activeWallpaper === idOrUrl || (target && this.data.settings.activeWallpaper === target.url)) {
+      this.data.settings.activeWallpaper = DEFAULT_WALLPAPER_URL;
+    }
+    this.applyAccentAndWallpaperToThemes(this.data.themes, this.data.settings);
+    this.saveData();
+    return {
+      theme: this.getActiveTheme(),
+      settings: this.data.settings
+    };
   }
 
   // Themes
@@ -657,6 +815,7 @@ class Store {
       }
     }
 
+    this.applyAccentAndWallpaperToThemes(this.data.themes, this.data.settings);
     this.saveData();
     return {
       theme: target,

@@ -62,16 +62,7 @@
   let currentThemeObj = null;
 
   // Unified Pinned Apps (Desktop & Start Menu synchronized)
-  let pinnedApps = [
-    { id: 'pin_github', title: 'GitHub', url: 'https://github.com', icon: 'https://github.githubassets.com/favicons/favicon.png', favicon: 'https://github.githubassets.com/favicons/favicon.png', gridCol: 0, gridRow: 0 },
-    { id: 'pin_youtube', title: 'YouTube', url: 'https://youtube.com', icon: 'https://www.youtube.com/s/desktop/f7125368/img/favicon_144x144.png', favicon: 'https://www.youtube.com/s/desktop/f7125368/img/favicon_144x144.png', gridCol: 0, gridRow: 1 },
-    { id: 'pin_reddit', title: 'Reddit', url: 'https://reddit.com', icon: 'https://www.redditstatic.com/shreddit/assets/favicon/192x192.png', favicon: 'https://www.redditstatic.com/shreddit/assets/favicon/192x192.png', gridCol: 0, gridRow: 2 },
-    { id: 'pin_wikipedia', title: 'Wikipedia', url: 'https://wikipedia.org', icon: 'https://en.wikipedia.org/static/favicon/wikipedia.ico', favicon: 'https://en.wikipedia.org/static/favicon/wikipedia.ico', gridCol: 0, gridRow: 3 },
-    { id: 'pin_twitch', title: 'Twitch', url: 'https://twitch.tv', icon: 'https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png', favicon: 'https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png', gridCol: 0, gridRow: 4 },
-    { id: 'pin_hn', title: 'Hacker News', url: 'https://news.ycombinator.com', icon: 'https://news.ycombinator.com/favicon.ico', favicon: 'https://news.ycombinator.com/favicon.ico', gridCol: 0, gridRow: 5 },
-    { id: 'pin_chatgpt', title: 'ChatGPT', url: 'https://chatgpt.com', icon: 'https://oaistatic-cdn.azureedge.net/chatgpt/favicon.ico', favicon: 'https://oaistatic-cdn.azureedge.net/chatgpt/favicon.ico', gridCol: 1, gridRow: 0 },
-    { id: 'pin_claude', title: 'Claude', url: 'https://claude.ai', icon: 'https://claude.ai/favicon.ico', favicon: 'https://claude.ai/favicon.ico', gridCol: 1, gridRow: 1 }
-  ];
+  let pinnedApps = [];
   let desktopApps = pinnedApps;
   let activeShortcuts = pinnedApps;
 
@@ -207,12 +198,14 @@
     }
 
     // 1. CSS Variables
-    if (nt.cssVariables) {
-      const rootStyle = document.documentElement.style;
-      Object.entries(nt.cssVariables).forEach(([prop, val]) => {
-        rootStyle.setProperty(prop, val);
-      });
-    }
+    const vars = {
+      ...((theme.chrome && theme.chrome.cssVariables) || {}),
+      ...(nt.cssVariables || {})
+    };
+    const rootStyle = document.documentElement.style;
+    Object.entries(vars).forEach(([prop, val]) => {
+      rootStyle.setProperty(prop, val);
+    });
 
     // 2. Wallpaper constructs
     if (nt.wallpaper) {
@@ -284,17 +277,6 @@
     if (nt.shortcuts) {
       const shortcutsSection = document.querySelector('.shortcuts-section');
       if (shortcutsSection) shortcutsSection.style.display = nt.shortcuts.visible === false ? 'none' : '';
-      if (Array.isArray(nt.shortcuts.items) && (!pinnedApps || pinnedApps.length === 0)) {
-        pinnedApps = nt.shortcuts.items.map((p, idx) => ({
-          id: p.id || ('pin_' + idx),
-          title: p.title || 'Untitled',
-          url: p.url,
-          icon: p.icon || p.favicon || '',
-          favicon: p.favicon || p.icon || '',
-          gridCol: (p.gridCol !== undefined && !isNaN(p.gridCol)) ? Number(p.gridCol) : Math.floor(idx / 6),
-          gridRow: (p.gridRow !== undefined && !isNaN(p.gridRow)) ? Number(p.gridRow) : (idx % 6)
-        }));
-      }
     }
     renderShortcuts();
     renderOniOsDesktop();
@@ -466,6 +448,10 @@
   function renderStartMenuApps() {
     if (!osStartAppsGrid) return;
     osStartAppsGrid.innerHTML = '';
+    if (!pinnedApps || pinnedApps.length === 0) {
+      osStartAppsGrid.innerHTML = '<div style="grid-column: 1 / -1; text-align: center; color: var(--text-muted); font-size: 11.5px; padding: 18px 8px;">No pinned apps yet. Click "＋ Pin New App" below to add one.</div>';
+      return;
+    }
     pinnedApps.forEach((app, index) => {
       const item = document.createElement('a');
       item.className = 'os-start-app' + (isStartMenuEditMode ? ' editing' : '');
@@ -867,148 +853,310 @@
     });
   }
 
+  let activeSettingsSection = 'general';
+
   async function renderOsSettingsWindow() {
     const body = document.getElementById('os-win-settings-body');
     if (!body || !window.oniAPI) return;
-    const [themes, activeTheme] = await Promise.all([
+    const [themes, activeTheme, settings, shieldStats, accentColors] = await Promise.all([
       window.oniAPI.getThemes(),
-      window.oniAPI.getActiveTheme()
+      window.oniAPI.getActiveTheme(),
+      window.oniAPI.getSettings ? window.oniAPI.getSettings() : { searchEngine: 'google' },
+      window.oniAPI.getShieldStats ? window.oniAPI.getShieldStats() : { enabled: true, totalBlocked: 0 },
+      window.oniAPI.getAccentColors ? window.oniAPI.getAccentColors() : []
     ]);
 
-    const sortedThemes = [...(themes || [])].sort((a, b) => {
-      if (a.id === 'oni-os') return -1;
-      if (b.id === 'oni-os') return 1;
-      if (a.id === 'classic') return -1;
-      if (b.id === 'classic') return 1;
-      return 0;
+    const currentEngineKey = (settings && settings.searchEngine) || 'google';
+    const foundEngIdx = ENGINES.findIndex(e => e.key === currentEngineKey);
+    if (foundEngIdx >= 0) currentEngineIndex = foundEngIdx;
+
+    const isShieldEnabled = !!(shieldStats && shieldStats.enabled !== false);
+    const blockedCount = (shieldStats && shieldStats.totalBlocked) || 0;
+
+    let themesHtml = '';
+    (themes || []).forEach(t => {
+      const isActive = activeTheme && activeTheme.id === t.id;
+      themesHtml += `
+        <div class="os-list-row os-theme-card" data-id="${t.id}" style="${isActive ? 'border-color:var(--accent-green); background:rgba(var(--accent-rgb),0.1);' : ''}">
+          <div>
+            <div style="font-weight:700; color:#fff; display:flex; align-items:center; gap:8px;">
+              <span>${t.name}</span>
+              ${isActive ? '<span style="font-size:10px; background:var(--accent-green); color:#04140b; font-weight:800; padding:1px 6px; border-radius:4px;">ACTIVE</span>' : ''}
+            </div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">${t.description || ''}</div>
+          </div>
+          <button class="os-btn-primary os-theme-apply-btn" data-id="${t.id}" style="padding:4px 12px; font-size:11px; ${isActive ? 'display:none;' : ''}">Apply</button>
+        </div>
+      `;
     });
 
-    body.innerHTML = `
-      <div style="margin-bottom:14px;">
-        <div class="os-field-label">Active Operating Theme Construct</div>
-        <div style="display:flex; flex-direction:column; gap:8px; margin-top:6px;">
-          ${sortedThemes.map(t => `
-            <div class="os-list-row os-theme-pick" data-theme-id="${t.id}" style="border-color:${t.id === activeTheme.id ? 'var(--accent-green)' : 'rgba(255,255,255,0.08)'};">
-              <div>
-                <div style="font-weight:700; color:#fff;">${t.name} ${t.id === activeTheme.id ? '<span style="color:var(--accent-green);font-size:10px;margin-left:6px;">● ACTIVE</span>' : ''}</div>
-                <div style="font-size:11px; color:var(--text-muted);">${t.description || ''}</div>
-              </div>
-              <button class="os-btn-ghost" style="white-space:nowrap;">Apply</button>
-            </div>
-          `).join('')}
-        </div>
-      </div>
+    // Accent Color options (Emerald preselected by default)
+    const activeAccentId = (settings && settings.accentColor) || 'emerald';
+    const availableAccents = Array.isArray(accentColors) && accentColors.length > 0 ? accentColors : [
+      { id: 'emerald', name: 'Emerald', hex: '#00ff88' },
+      { id: 'crimson', name: 'Crimson', hex: '#ff3366' },
+      { id: 'cyan', name: 'Cyan', hex: '#00e5ff' },
+      { id: 'violet', name: 'Violet', hex: '#a855f7' },
+      { id: 'amber', name: 'Amber', hex: '#f59e0b' },
+      { id: 'rose', name: 'Rose', hex: '#f43f5e' },
+      { id: 'blue', name: 'Ocean Blue', hex: '#3b82f6' }
+    ];
 
-      <div style="margin-top:14px; padding-top:14px; border-top:1px solid rgba(255,255,255,0.08);">
-        <div class="os-field-label">Privacy &amp; Security</div>
-        <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06); border-radius:10px; padding:12px; margin-top:6px;">
-          <div style="font-weight:600; font-size:12.5px; color:#fff; margin-bottom:2px;">Clear Browsing Data</div>
-          <div style="font-size:11px; color:var(--text-muted); margin-bottom:10px;">Delete history, cookies, cache, and more.</div>
-          
-          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px 12px; margin-bottom:12px; font-size:11.5px; color:#d1d5db;">
-            <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-              <input type="checkbox" id="os-win-clear-history" checked style="accent-color:var(--accent-green); cursor:pointer;">
-              <span>Browsing History</span>
-            </label>
-            <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-              <input type="checkbox" id="os-win-clear-cookies" checked style="accent-color:var(--accent-green); cursor:pointer;">
-              <span>Cookies &amp; Site Data</span>
-            </label>
-            <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-              <input type="checkbox" id="os-win-clear-cache" checked style="accent-color:var(--accent-green); cursor:pointer;">
-              <span>Cached Images &amp; Files</span>
-            </label>
-            <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-              <input type="checkbox" id="os-win-clear-storage" checked style="accent-color:var(--accent-green); cursor:pointer;">
-              <span>Storage &amp; Service Workers</span>
-            </label>
-          </div>
+    let accentColorsHtml = '';
+    availableAccents.forEach(c => {
+      const isSel = c.id === activeAccentId;
+      accentColorsHtml += `
+        <button type="button" class="os-accent-option ${isSel ? 'active' : ''}" data-accent-id="${c.id}" title="${c.name}">
+          <span class="os-accent-swatch" style="background:${c.hex}; color:${c.hex};"></span>
+          <span>${c.name}</span>
+        </button>
+      `;
+    });
 
-          <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
-            <div id="os-win-clear-status" style="font-size:11px; color:var(--accent-green); font-weight:500;" class="hidden"></div>
-            <button class="os-btn-danger" id="os-win-btn-clear-data" style="margin-left:auto; display:flex; align-items:center; gap:6px;">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <polyline points="3 6 5 6 21 6"></polyline>
-                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-              </svg>
-              <span>Delete Browsing Data</span>
-            </button>
-          </div>
-        </div>
-      </div>
+    // Wallpaper options (Default wallpaper preselected + custom imported wallpapers + plus button)
+    const defaultWpUrl = '../../assets/wallpaper.jpg';
+    const activeWpUrl = (settings && settings.activeWallpaper) || defaultWpUrl;
+    const customWallpapers = (settings && Array.isArray(settings.customWallpapers)) ? settings.customWallpapers : [];
+    const isDefaultWpActive = !activeWpUrl || activeWpUrl === defaultWpUrl;
 
-      <div style="display:flex; justify-content:space-between; align-items:center; padding-top:12px; margin-top:12px; border-top:1px solid rgba(255,255,255,0.08);">
-        <span style="font-size:11.5px; color:var(--text-muted);">Home Widgets Panel</span>
-        <button class="os-btn-ghost" id="os-win-toggle-widgets">Toggle Widgets</button>
+    let wallpapersHtml = `
+      <div class="os-wallpaper-card ${isDefaultWpActive ? 'active' : ''}" data-wp-url="${defaultWpUrl}" style="background-image: url('${defaultWpUrl}');" title="Oni Default Wallpaper">
+        ${isDefaultWpActive ? '<span class="os-wallpaper-badge">ACTIVE</span>' : ''}
+        <span class="os-wallpaper-label">Default</span>
       </div>
     `;
 
-    body.querySelectorAll('.os-theme-pick').forEach(row => {
-      row.addEventListener('click', async () => {
-        const id = row.dataset.themeId;
-        if (id) {
-          const res = await window.oniAPI.applyTheme(id);
+    customWallpapers.forEach(wp => {
+      if (!wp || !wp.url) return;
+      const isActiveWp = activeWpUrl === wp.url;
+      const safeUrl = wp.url.replace(/'/g, "\\'");
+      wallpapersHtml += `
+        <div class="os-wallpaper-card ${isActiveWp ? 'active' : ''}" data-wp-url="${wp.url}" style="background-image: url('${safeUrl}');" title="${wp.name || 'Custom Wallpaper'}">
+          ${isActiveWp ? '<span class="os-wallpaper-badge">ACTIVE</span>' : ''}
+          <button type="button" class="os-wallpaper-remove" data-remove-wp="${wp.id || wp.url}" title="Remove wallpaper">✕</button>
+          <span class="os-wallpaper-label">${wp.name || 'Custom'}</span>
+        </div>
+      `;
+    });
+
+    wallpapersHtml += `
+      <button type="button" class="os-wallpaper-add-card" id="os-btn-import-wallpaper" title="Import custom wallpaper image">
+        <span class="os-wallpaper-add-icon">＋</span>
+        <span class="os-wallpaper-add-text">Add Image</span>
+      </button>
+    `;
+
+    let enginesHtml = '';
+    ENGINES.forEach(eng => {
+      const isSel = currentEngineKey === eng.key;
+      enginesHtml += `
+        <button class="os-btn-ghost os-engine-choice" data-key="${eng.key}" style="flex:1; padding:8px 0; font-size:11.5px; ${isSel ? 'border-color:var(--accent-green); color:var(--accent-green); background:rgba(var(--accent-rgb),0.12); font-weight:600;' : ''}">
+          ${eng.name}
+        </button>
+      `;
+    });
+
+    body.innerHTML = `
+      <div class="os-settings-layout">
+        <aside class="os-settings-sidebar" aria-label="Settings Navigation">
+          <button type="button" class="os-settings-nav-item ${activeSettingsSection === 'general' ? 'active' : ''}" data-section="general">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            <span>General</span>
+          </button>
+          <button type="button" class="os-settings-nav-item ${activeSettingsSection === 'customization' ? 'active' : ''}" data-section="customization">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+              <polyline points="2 17 12 22 22 17"></polyline>
+              <polyline points="2 12 12 17 22 12"></polyline>
+            </svg>
+            <span>Customization</span>
+          </button>
+          <button type="button" class="os-settings-nav-item ${activeSettingsSection === 'privacy' ? 'active' : ''}" data-section="privacy">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+            </svg>
+            <span>Privacy and Data</span>
+          </button>
+        </aside>
+
+        <div class="os-settings-canvas">
+          <!-- Section 1: General -->
+          <div class="os-settings-section ${activeSettingsSection === 'general' ? '' : 'hidden'}" data-section-panel="general">
+            <div class="os-settings-section-header">
+              <div class="os-settings-section-title">General</div>
+              <div class="os-settings-section-desc">Configure default search engine and browsing preferences.</div>
+            </div>
+            <div>
+              <div class="os-settings-group-label">Search Engine</div>
+              <div style="display:flex; gap:8px;">
+                ${enginesHtml}
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 2: Customization -->
+          <div class="os-settings-section ${activeSettingsSection === 'customization' ? '' : 'hidden'}" data-section-panel="customization">
+            <div class="os-settings-section-header">
+              <div class="os-settings-section-title">Customization</div>
+              <div class="os-settings-section-desc">Personalize your Oni Browser theme, wallpaper, and global accent color.</div>
+            </div>
+            <div style="margin-bottom: 18px;">
+              <div class="os-settings-group-label">Themes</div>
+              <div style="display:flex; flex-direction:column; gap:8px;">
+                ${themesHtml}
+              </div>
+            </div>
+
+            <div style="margin-bottom: 18px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.08);">
+              <div class="os-settings-group-label">Wallpaper</div>
+              <div class="os-wallpaper-grid">
+                ${wallpapersHtml}
+              </div>
+            </div>
+
+            <div style="padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.08);">
+              <div class="os-settings-group-label">Accent Color</div>
+              <div class="os-accent-grid">
+                ${accentColorsHtml}
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 3: Privacy and Data -->
+          <div class="os-settings-section ${activeSettingsSection === 'privacy' ? '' : 'hidden'}" data-section-panel="privacy">
+            <div class="os-settings-section-header">
+              <div class="os-settings-section-title">Privacy and Data</div>
+              <div class="os-settings-section-desc">Manage Oni Shield protection and browsing data.</div>
+            </div>
+            <div style="margin-bottom:18px;">
+              <div class="os-settings-group-label">Oni Shield Protection</div>
+              <div class="os-list-row" style="cursor:default; margin-bottom:0;">
+                <div>
+                  <div style="font-weight:600; color:#fff;">Ad &amp; Tracker Blocker</div>
+                  <div style="font-size:11px; color:var(--text-muted);">Neutralized ${blockedCount} invasive requests</div>
+                </div>
+                <button id="os-set-toggle-shield" class="os-btn-ghost" style="padding:4px 12px; font-size:11px; color:${isShieldEnabled ? 'var(--accent-green)' : 'var(--text-muted)'};">
+                  ${isShieldEnabled ? 'Active ✓' : 'Disabled'}
+                </button>
+              </div>
+            </div>
+
+            <div style="padding-top:14px; border-top:1px solid rgba(255,255,255,0.08);">
+              <div class="os-settings-group-label">Browsing History &amp; Cache</div>
+              <button id="os-set-btn-clear-data" class="os-btn-danger" style="width:100%; padding:8px 0; font-size:12px;">Clear Browsing History &amp; Cache</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    body.querySelectorAll('.os-settings-nav-item').forEach(navBtn => {
+      navBtn.addEventListener('click', () => {
+        const targetSection = navBtn.dataset.section;
+        if (!targetSection) return;
+        activeSettingsSection = targetSection;
+
+        body.querySelectorAll('.os-settings-nav-item').forEach(btn => {
+          btn.classList.toggle('active', btn.dataset.section === targetSection);
+        });
+        body.querySelectorAll('.os-settings-section').forEach(panel => {
+          panel.classList.toggle('hidden', panel.dataset.sectionPanel !== targetSection);
+        });
+      });
+    });
+
+    body.querySelectorAll('.os-theme-apply-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const tid = btn.dataset.id;
+        if (tid && window.oniAPI && window.oniAPI.applyTheme) {
+          const res = await window.oniAPI.applyTheme(tid);
           if (res && res.theme) applyNewTabTheme(res.theme);
           await renderOsSettingsWindow();
         }
       });
     });
 
-    const clearDataBtn = document.getElementById('os-win-btn-clear-data');
-    if (clearDataBtn) {
-      clearDataBtn.addEventListener('click', async () => {
-        const history = document.getElementById('os-win-clear-history')?.checked ?? true;
-        const cookies = document.getElementById('os-win-clear-cookies')?.checked ?? true;
-        const cache = document.getElementById('os-win-clear-cache')?.checked ?? true;
-        const storage = document.getElementById('os-win-clear-storage')?.checked ?? true;
-        const statusEl = document.getElementById('os-win-clear-status');
+    body.querySelectorAll('.os-accent-option').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const colorId = btn.dataset.accentId;
+        if (colorId && window.oniAPI && window.oniAPI.setAccentColor) {
+          const res = await window.oniAPI.setAccentColor(colorId);
+          if (res && res.theme) applyNewTabTheme(res.theme);
+          await renderOsSettingsWindow();
+        }
+      });
+    });
 
-        clearDataBtn.disabled = true;
-        clearDataBtn.textContent = 'Deleting...';
+    body.querySelectorAll('.os-wallpaper-card').forEach(card => {
+      card.addEventListener('click', async (e) => {
+        if (e.target.closest('.os-wallpaper-remove')) return;
+        const wpUrl = card.dataset.wpUrl;
+        if (wpUrl && window.oniAPI && window.oniAPI.setWallpaper) {
+          const res = await window.oniAPI.setWallpaper(wpUrl);
+          if (res && res.theme) applyNewTabTheme(res.theme);
+          await renderOsSettingsWindow();
+        }
+      });
+    });
 
-        try {
-          if (window.oniAPI && window.oniAPI.clearBrowsingData) {
-            await window.oniAPI.clearBrowsingData({ history, cookies, cache, storage });
-          } else if (window.oniAPI && window.oniAPI.clearHistory && history) {
-            await window.oniAPI.clearHistory();
-          }
+    body.querySelectorAll('.os-wallpaper-remove').forEach(rmBtn => {
+      rmBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const idOrUrl = rmBtn.dataset.removeWp;
+        if (idOrUrl && window.oniAPI && window.oniAPI.removeWallpaper) {
+          const res = await window.oniAPI.removeWallpaper(idOrUrl);
+          if (res && res.theme) applyNewTabTheme(res.theme);
+          await renderOsSettingsWindow();
+        }
+      });
+    });
 
-          if (history && typeof renderOsHistoryWindow === 'function') {
-            await renderOsHistoryWindow();
+    const importWpBtn = document.getElementById('os-btn-import-wallpaper');
+    if (importWpBtn) {
+      importWpBtn.addEventListener('click', async () => {
+        if (window.oniAPI && window.oniAPI.importWallpaper) {
+          const res = await window.oniAPI.importWallpaper();
+          if (res && !res.canceled) {
+            if (res.theme) applyNewTabTheme(res.theme);
+            await renderOsSettingsWindow();
           }
-
-          if (statusEl) {
-            statusEl.textContent = 'Browsing data deleted successfully ✓';
-            statusEl.style.color = 'var(--accent-green)';
-            statusEl.classList.remove('hidden');
-            setTimeout(() => {
-              if (statusEl) statusEl.classList.add('hidden');
-            }, 3000);
-          }
-        } catch (err) {
-          console.error('Failed to clear browsing data:', err);
-          if (statusEl) {
-            statusEl.textContent = 'Failed to delete some data';
-            statusEl.style.color = '#ef4444';
-            statusEl.classList.remove('hidden');
-          }
-        } finally {
-          clearDataBtn.disabled = false;
-          clearDataBtn.innerHTML = `
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="3 6 5 6 21 6"></polyline>
-              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-            </svg>
-            <span>Delete Browsing Data</span>
-          `;
         }
       });
     }
 
-    const toggleWidgetsBtn = document.getElementById('os-win-toggle-widgets');
-    if (toggleWidgetsBtn) {
-      toggleWidgetsBtn.addEventListener('click', () => {
-        if (osWidgetsPanel) osWidgetsPanel.classList.toggle('hidden');
+    body.querySelectorAll('.os-engine-choice').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const k = btn.dataset.key;
+        if (k && window.oniAPI && window.oniAPI.updateSettings) {
+          await window.oniAPI.updateSettings({ searchEngine: k });
+          await renderOsSettingsWindow();
+        }
+      });
+    });
+
+    const shieldToggle = document.getElementById('os-set-toggle-shield');
+    if (shieldToggle) {
+      shieldToggle.addEventListener('click', async () => {
+        if (window.oniAPI && window.oniAPI.toggleShield) {
+          const stats = await window.oniAPI.getShieldStats();
+          await window.oniAPI.toggleShield(!stats.enabled);
+          await renderOsSettingsWindow();
+        }
+      });
+    }
+
+    const clearDataBtn = document.getElementById('os-set-btn-clear-data');
+    if (clearDataBtn) {
+      clearDataBtn.addEventListener('click', async () => {
+        if (confirm('Clear all browsing history, cache, and downloads?')) {
+          if (window.oniAPI && window.oniAPI.clearBrowsingData) {
+            await window.oniAPI.clearBrowsingData({ history: true, cache: true, downloads: true });
+            await renderOsSettingsWindow();
+          }
+        }
       });
     }
   }
@@ -1521,7 +1669,7 @@
 
         if (window.oniAPI.getBookmarks) {
           const bms = await window.oniAPI.getBookmarks();
-          if (Array.isArray(bms) && bms.length > 0) {
+          if (Array.isArray(bms)) {
             handlePinnedAppsUpdate(bms);
           }
         }

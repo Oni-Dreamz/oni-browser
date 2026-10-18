@@ -66,11 +66,16 @@ if (window.location.protocol === 'file:') {
     getSettings: () => ipcRenderer.invoke('settings:get'),
     updateSettings: (settings) => ipcRenderer.invoke('settings:update', settings),
 
-    // Themes
+    // Themes & Customization
     getThemes: () => ipcRenderer.invoke('themes:getAll'),
     getActiveTheme: () => ipcRenderer.invoke('themes:getActive'),
     applyTheme: (themeId) => ipcRenderer.invoke('themes:apply', themeId),
     saveTheme: (options) => ipcRenderer.invoke('themes:save', options),
+    getAccentColors: () => ipcRenderer.invoke('customization:getAccentColors'),
+    setAccentColor: (colorId) => ipcRenderer.invoke('customization:setAccentColor', colorId),
+    setWallpaper: (wallpaperUrl) => ipcRenderer.invoke('customization:setWallpaper', wallpaperUrl),
+    importWallpaper: () => ipcRenderer.invoke('customization:importWallpaper'),
+    removeWallpaper: (idOrUrl) => ipcRenderer.invoke('customization:removeWallpaper', idOrUrl),
 
     // Shield
     getShieldStats: () => ipcRenderer.invoke('shield:getStats'),

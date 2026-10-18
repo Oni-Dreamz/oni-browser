@@ -518,26 +518,33 @@
     });
   }
 
+  let activeSettingsSection = 'general';
+
   // Settings Window View
   async function renderOsSettingsWindow() {
     if (!settingsBody || !window.oniAPI) return;
-    const [themes, activeTheme, settings, shieldStats] = await Promise.all([
+    const [themes, activeTheme, settings, shieldStats, accentColors] = await Promise.all([
       window.oniAPI.getThemes(),
       window.oniAPI.getActiveTheme(),
       window.oniAPI.getSettings(),
-      window.oniAPI.getShieldStats ? window.oniAPI.getShieldStats() : { enabled: true, totalBlocked: 0 }
+      window.oniAPI.getShieldStats ? window.oniAPI.getShieldStats() : { enabled: true, totalBlocked: 0 },
+      window.oniAPI.getAccentColors ? window.oniAPI.getAccentColors() : []
     ]);
 
-    let html = `
-      <div style="margin-bottom:18px;">
-        <div style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.8px; margin-bottom:10px;">Themes</div>
-        <div style="display:flex; flex-direction:column; gap:8px;">
-    `;
+    if (activeTheme) applyThemeVariables(activeTheme);
 
+    const currentEngineKey = (settings && settings.searchEngine) || 'google';
+    const foundEngIdx = ENGINES.findIndex(e => e.key === currentEngineKey);
+    if (foundEngIdx >= 0) currentEngineIndex = foundEngIdx;
+
+    const isShieldEnabled = !!(shieldStats && shieldStats.enabled !== false);
+    const blockedCount = (shieldStats && shieldStats.totalBlocked) || 0;
+
+    let themesHtml = '';
     (themes || []).forEach(t => {
       const isActive = activeTheme && activeTheme.id === t.id;
-      html += `
-        <div class="os-list-row os-theme-card" data-id="${t.id}" style="${isActive ? 'border-color:var(--accent-green); background:rgba(0,255,136,0.1);' : ''}">
+      themesHtml += `
+        <div class="os-list-row os-theme-card" data-id="${t.id}" style="${isActive ? 'border-color:var(--accent-green); background:rgba(var(--accent-rgb),0.1);' : ''}">
           <div>
             <div style="font-weight:700; color:#fff; display:flex; align-items:center; gap:8px;">
               <span>${t.name}</span>
@@ -550,48 +557,186 @@
       `;
     });
 
-    html += `
-        </div>
-      </div>
+    // Accent Color options (Emerald preselected by default)
+    const activeAccentId = (settings && settings.accentColor) || 'emerald';
+    const availableAccents = Array.isArray(accentColors) && accentColors.length > 0 ? accentColors : [
+      { id: 'emerald', name: 'Emerald', hex: '#00ff88' },
+      { id: 'crimson', name: 'Crimson', hex: '#ff3366' },
+      { id: 'cyan', name: 'Cyan', hex: '#00e5ff' },
+      { id: 'violet', name: 'Violet', hex: '#a855f7' },
+      { id: 'amber', name: 'Amber', hex: '#f59e0b' },
+      { id: 'rose', name: 'Rose', hex: '#f43f5e' },
+      { id: 'blue', name: 'Ocean Blue', hex: '#3b82f6' }
+    ];
 
-      <div style="margin-bottom:18px; padding-top:14px; border-top:1px solid rgba(255,255,255,0.08);">
-        <div style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.8px; margin-bottom:10px;">Search Engine</div>
-        <div style="display:flex; gap:8px;">
+    let accentColorsHtml = '';
+    availableAccents.forEach(c => {
+      const isSel = c.id === activeAccentId;
+      accentColorsHtml += `
+        <button type="button" class="os-accent-option ${isSel ? 'active' : ''}" data-accent-id="${c.id}" title="${c.name}">
+          <span class="os-accent-swatch" style="background:${c.hex}; color:${c.hex};"></span>
+          <span>${c.name}</span>
+        </button>
+      `;
+    });
+
+    // Wallpaper options (Default wallpaper preselected + custom imported wallpapers + plus button)
+    const defaultWpUrl = '../../assets/wallpaper.jpg';
+    const activeWpUrl = (settings && settings.activeWallpaper) || defaultWpUrl;
+    const customWallpapers = (settings && Array.isArray(settings.customWallpapers)) ? settings.customWallpapers : [];
+    const isDefaultWpActive = !activeWpUrl || activeWpUrl === defaultWpUrl;
+
+    let wallpapersHtml = `
+      <div class="os-wallpaper-card ${isDefaultWpActive ? 'active' : ''}" data-wp-url="${defaultWpUrl}" style="background-image: url('${defaultWpUrl}');" title="Oni Default Wallpaper">
+        ${isDefaultWpActive ? '<span class="os-wallpaper-badge">ACTIVE</span>' : ''}
+        <span class="os-wallpaper-label">Default</span>
+      </div>
     `;
 
+    customWallpapers.forEach(wp => {
+      if (!wp || !wp.url) return;
+      const isActiveWp = activeWpUrl === wp.url;
+      const safeUrl = wp.url.replace(/'/g, "\\'");
+      wallpapersHtml += `
+        <div class="os-wallpaper-card ${isActiveWp ? 'active' : ''}" data-wp-url="${wp.url}" style="background-image: url('${safeUrl}');" title="${wp.name || 'Custom Wallpaper'}">
+          ${isActiveWp ? '<span class="os-wallpaper-badge">ACTIVE</span>' : ''}
+          <button type="button" class="os-wallpaper-remove" data-remove-wp="${wp.id || wp.url}" title="Remove wallpaper">✕</button>
+          <span class="os-wallpaper-label">${wp.name || 'Custom'}</span>
+        </div>
+      `;
+    });
+
+    wallpapersHtml += `
+      <button type="button" class="os-wallpaper-add-card" id="os-btn-import-wallpaper" title="Import custom wallpaper image">
+        <span class="os-wallpaper-add-icon">＋</span>
+        <span class="os-wallpaper-add-text">Add Image</span>
+      </button>
+    `;
+
+    let enginesHtml = '';
     ENGINES.forEach(eng => {
-      const isSel = (settings.searchEngine || 'google') === eng.key;
-      html += `
-        <button class="os-btn-ghost os-engine-choice" data-key="${eng.key}" style="flex:1; padding:7px 0; font-size:11.5px; ${isSel ? 'border-color:var(--accent-green); color:var(--accent-green); background:rgba(0,255,136,0.12);' : ''}">
+      const isSel = currentEngineKey === eng.key;
+      enginesHtml += `
+        <button class="os-btn-ghost os-engine-choice" data-key="${eng.key}" style="flex:1; padding:8px 0; font-size:11.5px; ${isSel ? 'border-color:var(--accent-green); color:var(--accent-green); background:rgba(var(--accent-rgb),0.12); font-weight:600;' : ''}">
           ${eng.name}
         </button>
       `;
     });
 
-    html += `
-        </div>
-      </div>
-
-      <div style="margin-bottom:18px; padding-top:14px; border-top:1px solid rgba(255,255,255,0.08);">
-        <div style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.8px; margin-bottom:10px;">Oni Shield Protection</div>
-        <div class="os-list-row" style="cursor:default;">
-          <div>
-            <div style="font-weight:600; color:#fff;">Ad &amp; Tracker Blocker</div>
-            <div style="font-size:11px; color:var(--text-muted);">Neutralized ${(shieldStats && shieldStats.totalBlocked) || 0} invasive requests</div>
-          </div>
-          <button id="os-set-toggle-shield" class="os-btn-ghost" style="padding:4px 12px; font-size:11px; color:${(shieldStats && shieldStats.enabled !== false) ? 'var(--accent-green)' : 'var(--text-muted)'};">
-            ${(shieldStats && shieldStats.enabled !== false) ? 'Active ✓' : 'Disabled'}
+    const html = `
+      <div class="os-settings-layout">
+        <aside class="os-settings-sidebar" aria-label="Settings Navigation">
+          <button type="button" class="os-settings-nav-item ${activeSettingsSection === 'general' ? 'active' : ''}" data-section="general">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            <span>General</span>
           </button>
-        </div>
-      </div>
+          <button type="button" class="os-settings-nav-item ${activeSettingsSection === 'customization' ? 'active' : ''}" data-section="customization">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+              <polyline points="2 17 12 22 22 17"></polyline>
+              <polyline points="2 12 12 17 22 12"></polyline>
+            </svg>
+            <span>Customization</span>
+          </button>
+          <button type="button" class="os-settings-nav-item ${activeSettingsSection === 'privacy' ? 'active' : ''}" data-section="privacy">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+            </svg>
+            <span>Privacy and Data</span>
+          </button>
+        </aside>
 
-      <div style="padding-top:14px; border-top:1px solid rgba(255,255,255,0.08);">
-        <div style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.8px; margin-bottom:8px;">Privacy &amp; Data</div>
-        <button id="os-set-btn-clear-data" class="os-btn-danger" style="width:100%; padding:8px 0; font-size:12px;">Clear Browsing History &amp; Cache</button>
+        <div class="os-settings-canvas">
+          <!-- Section 1: General -->
+          <div class="os-settings-section ${activeSettingsSection === 'general' ? '' : 'hidden'}" data-section-panel="general">
+            <div class="os-settings-section-header">
+              <div class="os-settings-section-title">General</div>
+              <div class="os-settings-section-desc">Configure default search engine and browsing preferences.</div>
+            </div>
+            <div>
+              <div class="os-settings-group-label">Search Engine</div>
+              <div style="display:flex; gap:8px;">
+                ${enginesHtml}
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 2: Customization -->
+          <div class="os-settings-section ${activeSettingsSection === 'customization' ? '' : 'hidden'}" data-section-panel="customization">
+            <div class="os-settings-section-header">
+              <div class="os-settings-section-title">Customization</div>
+              <div class="os-settings-section-desc">Personalize your Oni Browser theme, wallpaper, and global accent color.</div>
+            </div>
+            <div style="margin-bottom: 18px;">
+              <div class="os-settings-group-label">Themes</div>
+              <div style="display:flex; flex-direction:column; gap:8px;">
+                ${themesHtml}
+              </div>
+            </div>
+
+            <div style="margin-bottom: 18px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.08);">
+              <div class="os-settings-group-label">Wallpaper</div>
+              <div class="os-wallpaper-grid">
+                ${wallpapersHtml}
+              </div>
+            </div>
+
+            <div style="padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.08);">
+              <div class="os-settings-group-label">Accent Color</div>
+              <div class="os-accent-grid">
+                ${accentColorsHtml}
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 3: Privacy and Data -->
+          <div class="os-settings-section ${activeSettingsSection === 'privacy' ? '' : 'hidden'}" data-section-panel="privacy">
+            <div class="os-settings-section-header">
+              <div class="os-settings-section-title">Privacy and Data</div>
+              <div class="os-settings-section-desc">Manage Oni Shield protection and browsing data.</div>
+            </div>
+            <div style="margin-bottom:18px;">
+              <div class="os-settings-group-label">Oni Shield Protection</div>
+              <div class="os-list-row" style="cursor:default; margin-bottom:0;">
+                <div>
+                  <div style="font-weight:600; color:#fff;">Ad &amp; Tracker Blocker</div>
+                  <div style="font-size:11px; color:var(--text-muted);">Neutralized ${blockedCount} invasive requests</div>
+                </div>
+                <button id="os-set-toggle-shield" class="os-btn-ghost" style="padding:4px 12px; font-size:11px; color:${isShieldEnabled ? 'var(--accent-green)' : 'var(--text-muted)'};">
+                  ${isShieldEnabled ? 'Active ✓' : 'Disabled'}
+                </button>
+              </div>
+            </div>
+
+            <div style="padding-top:14px; border-top:1px solid rgba(255,255,255,0.08);">
+              <div class="os-settings-group-label">Browsing History &amp; Cache</div>
+              <button id="os-set-btn-clear-data" class="os-btn-danger" style="width:100%; padding:8px 0; font-size:12px;">Clear Browsing History &amp; Cache</button>
+            </div>
+          </div>
+        </div>
       </div>
     `;
 
     settingsBody.innerHTML = html;
+
+    // Sidebar navigation clicks
+    settingsBody.querySelectorAll('.os-settings-nav-item').forEach(navBtn => {
+      navBtn.addEventListener('click', () => {
+        const targetSection = navBtn.dataset.section;
+        if (!targetSection) return;
+        activeSettingsSection = targetSection;
+
+        settingsBody.querySelectorAll('.os-settings-nav-item').forEach(btn => {
+          btn.classList.toggle('active', btn.dataset.section === targetSection);
+        });
+        settingsBody.querySelectorAll('.os-settings-section').forEach(panel => {
+          panel.classList.toggle('hidden', panel.dataset.sectionPanel !== targetSection);
+        });
+      });
+    });
 
     settingsBody.querySelectorAll('.os-theme-apply-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
@@ -602,6 +747,55 @@
         }
       });
     });
+
+    // Accent Color selection
+    settingsBody.querySelectorAll('.os-accent-option').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const colorId = btn.dataset.accentId;
+        if (colorId && window.oniAPI && window.oniAPI.setAccentColor) {
+          const res = await window.oniAPI.setAccentColor(colorId);
+          if (res && res.theme) applyThemeVariables(res.theme);
+          renderOsSettingsWindow();
+        }
+      });
+    });
+
+    // Wallpaper selection
+    settingsBody.querySelectorAll('.os-wallpaper-card').forEach(card => {
+      card.addEventListener('click', async (e) => {
+        if (e.target.closest('.os-wallpaper-remove')) return;
+        const wpUrl = card.dataset.wpUrl;
+        if (wpUrl && window.oniAPI && window.oniAPI.setWallpaper) {
+          await window.oniAPI.setWallpaper(wpUrl);
+          renderOsSettingsWindow();
+        }
+      });
+    });
+
+    // Remove custom wallpaper
+    settingsBody.querySelectorAll('.os-wallpaper-remove').forEach(rmBtn => {
+      rmBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const idOrUrl = rmBtn.dataset.removeWp;
+        if (idOrUrl && window.oniAPI && window.oniAPI.removeWallpaper) {
+          await window.oniAPI.removeWallpaper(idOrUrl);
+          renderOsSettingsWindow();
+        }
+      });
+    });
+
+    // Import new custom wallpaper
+    const importWpBtn = document.getElementById('os-btn-import-wallpaper');
+    if (importWpBtn) {
+      importWpBtn.addEventListener('click', async () => {
+        if (window.oniAPI && window.oniAPI.importWallpaper) {
+          const res = await window.oniAPI.importWallpaper();
+          if (res && !res.canceled) {
+            renderOsSettingsWindow();
+          }
+        }
+      });
+    }
 
     settingsBody.querySelectorAll('.os-engine-choice').forEach(btn => {
       btn.addEventListener('click', async () => {

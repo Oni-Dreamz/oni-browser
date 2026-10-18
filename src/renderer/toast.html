@@ -5,6 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Oni OS Download Toast</title>
   <style>
+    :root {
+      --accent-green: #00ff88;
+      --accent-rgb: 0, 255, 136;
+    }
     * {
       box-sizing: border-box;
       margin: 0;
@@ -26,7 +30,7 @@
       width: calc(100% - 12px);
       height: calc(100% - 10px);
       background: rgba(10, 14, 24, 0.96);
-      border: 1px solid rgba(0, 255, 136, 0.45);
+      border: 1px solid rgba(var(--accent-rgb), 0.45);
       border-radius: 10px;
       padding: 7px 12px;
       display: flex;
@@ -34,7 +38,7 @@
       justify-content: space-between;
       gap: 10px;
       color: #f8fafc;
-      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.85), 0 0 18px rgba(0, 255, 136, 0.22);
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.85), 0 0 18px rgba(var(--accent-rgb), 0.22);
       backdrop-filter: blur(20px);
       animation: toastDrop 0.2s cubic-bezier(0.16, 1, 0.3, 1);
     }
@@ -53,18 +57,18 @@
       width: 26px;
       height: 26px;
       border-radius: 7px;
-      background: rgba(0, 255, 136, 0.14);
-      border: 1px solid rgba(0, 255, 136, 0.35);
+      background: rgba(var(--accent-rgb), 0.14);
+      border: 1px solid rgba(var(--accent-rgb), 0.35);
       display: flex;
       align-items: center;
       justify-content: center;
-      color: #00ff88;
+      color: var(--accent-green);
       flex-shrink: 0;
     }
     .toast-icon-wrap svg {
       width: 14px;
       height: 14px;
-      stroke: #00ff88;
+      stroke: var(--accent-green);
     }
     .toast-texts {
       min-width: 0;
@@ -95,9 +99,9 @@
       flex-shrink: 0;
     }
     .toast-btn-open {
-      background: rgba(0, 255, 136, 0.16);
-      color: #00ff88;
-      border: 1px solid rgba(0, 255, 136, 0.45);
+      background: rgba(var(--accent-rgb), 0.16);
+      color: var(--accent-green);
+      border: 1px solid rgba(var(--accent-rgb), 0.45);
       border-radius: 6px;
       padding: 4px 10px;
       font-size: 11px;
@@ -107,9 +111,9 @@
       font-family: inherit;
     }
     .toast-btn-open:hover {
-      background: #00ff88;
+      background: var(--accent-green);
       color: #050b14;
-      box-shadow: 0 0 10px rgba(0, 255, 136, 0.45);
+      box-shadow: 0 0 10px rgba(var(--accent-rgb), 0.45);
     }
     .toast-btn-close {
       background: transparent;

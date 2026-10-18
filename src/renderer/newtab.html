@@ -66,7 +66,7 @@
     <!-- Bottom Status Bar -->
     <footer class="dashboard-footer">
       <div class="footer-widget">
-        <svg viewBox="0 0 24 24" width="14" height="14" stroke="#00ff88" stroke-width="2" fill="none">
+        <svg viewBox="0 0 24 24" width="14" height="14" style="stroke: var(--accent-green);" stroke-width="2" fill="none">
           <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
         </svg>
         <span id="shield-stat-text">Oni Shield: Active Protection</span>
@@ -151,7 +151,7 @@
           </div>
           <div class="os-window-body">
             <form id="os-spotlight-form" class="os-spotlight-input-wrap">
-              <svg viewBox="0 0 24 24" width="18" height="18" stroke="#00ff88" stroke-width="2.5" fill="none">
+              <svg viewBox="0 0 24 24" width="18" height="18" style="stroke: var(--accent-green);" stroke-width="2.5" fill="none">
                 <circle cx="11" cy="11" r="8"></circle>
                 <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
               </svg>
@@ -165,7 +165,7 @@
         </div>
 
         <!-- Floating Window 2: Oni OS Settings & Themes -->
-        <div class="os-window hidden" id="os-win-settings" style="top: 12%; left: 22%; width: 520px;">
+        <div class="os-window hidden" id="os-win-settings" style="top: 12%; left: 22%; width: 620px;">
           <div class="os-window-titlebar" data-drag-window="os-win-settings">
             <div class="os-window-title">
               <span class="os-win-dot"></span>
@@ -175,7 +175,7 @@
               <button class="os-win-btn close" data-close-window="os-win-settings">✕</button>
             </div>
           </div>
-          <div class="os-window-body" id="os-win-settings-body">
+          <div class="os-window-body os-settings-modal-body" id="os-win-settings-body">
             <!-- Populated dynamically -->
           </div>
         </div>

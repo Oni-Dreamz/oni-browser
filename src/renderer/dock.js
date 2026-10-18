@@ -44,18 +44,18 @@
     }
   }
 
-  let pinnedApps = [
-    { title: 'GitHub', url: 'https://github.com', icon: 'https://github.githubassets.com/favicons/favicon.png' },
-    { title: 'YouTube', url: 'https://youtube.com', icon: 'https://www.youtube.com/s/desktop/f7125368/img/favicon_144x144.png' },
-    { title: 'Reddit', url: 'https://reddit.com', icon: 'https://www.redditstatic.com/shreddit/assets/favicon/192x192.png' },
-    { title: 'Wikipedia', url: 'https://wikipedia.org', icon: 'https://en.wikipedia.org/static/favicon/wikipedia.ico' },
-    { title: 'Twitch', url: 'https://twitch.tv', icon: 'https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png' },
-    { title: 'Hacker News', url: 'https://news.ycombinator.com', icon: 'https://news.ycombinator.com/favicon.ico' },
-    { title: 'ChatGPT', url: 'https://chatgpt.com', icon: 'https://oaistatic-cdn.azureedge.net/chatgpt/favicon.ico' },
-    { title: 'Claude', url: 'https://claude.ai', icon: 'https://claude.ai/favicon.ico' }
-  ];
+  let pinnedApps = [];
 
-  const DEFAULT_GLOBE_SVG = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="%2300ff88" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>';
+  function applyThemeVariables(theme) {
+    if (!theme) return;
+    const root = document.documentElement;
+    const vars = (theme.chrome && theme.chrome.cssVariables) || theme.cssVariables || {};
+    for (const [key, val] of Object.entries(vars)) {
+      root.style.setProperty(key, val);
+    }
+  }
+
+  const DEFAULT_GLOBE_SVG = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="%2394a3b8" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>';
 
   function isDesktopHomeTab(tab) {
     if (!tab) return false;
@@ -130,6 +130,10 @@
   function renderStartMenuApps() {
     if (!startAppsGrid) return;
     startAppsGrid.innerHTML = '';
+    if (!pinnedApps || pinnedApps.length === 0) {
+      startAppsGrid.innerHTML = '<div style="grid-column: 1 / -1; text-align: center; color: var(--text-muted); font-size: 11.5px; padding: 18px 8px;">No pinned apps yet. Click "＋ Pin New App" below to add one.</div>';
+      return;
+    }
     pinnedApps.forEach((app, index) => {
       const item = document.createElement('a');
       item.className = 'os-start-app' + (isStartMenuEditMode ? ' editing' : '');
@@ -591,7 +595,7 @@
       try {
         if (window.oniAPI.getBookmarks) {
           const bms = await window.oniAPI.getBookmarks();
-          if (Array.isArray(bms) && bms.length > 0) {
+          if (Array.isArray(bms)) {
             pinnedApps = bms;
           }
         }
@@ -602,6 +606,16 @@
               pinnedApps = bms;
               renderStartMenuApps();
             }
+          });
+        }
+
+        if (window.oniAPI.getActiveTheme) {
+          window.oniAPI.getActiveTheme().then(applyThemeVariables).catch(() => {});
+        }
+
+        if (window.oniAPI.onThemeChanged) {
+          window.oniAPI.onThemeChanged((payload) => {
+            if (payload && payload.theme) applyThemeVariables(payload.theme);
           });
         }
 

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, WebContentsView, ipcMain, shell, Menu, MenuItem, session, clipboard } = require('electron');
+const { app, BrowserWindow, WebContentsView, ipcMain, shell, Menu, MenuItem, session, clipboard, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const store = require('./store');
@@ -35,6 +35,15 @@ function sendToChromeAndDock(channel, payload) {
   }
   if (modalsView && modalsView.webContents && !modalsView.webContents.isDestroyed()) {
     modalsView.webContents.send(channel, payload);
+  }
+  if (tooltipView && tooltipView.webContents && !tooltipView.webContents.isDestroyed()) {
+    tooltipView.webContents.send(channel, payload);
+  }
+  if (toastView && toastView.webContents && !toastView.webContents.isDestroyed()) {
+    toastView.webContents.send(channel, payload);
+  }
+  if (contextMenuView && contextMenuView.webContents && !contextMenuView.webContents.isDestroyed()) {
+    contextMenuView.webContents.send(channel, payload);
   }
 }
 
@@ -1208,6 +1217,42 @@ ipcMain.handle('themes:apply', (event, themeId) => {
 ipcMain.handle('themes:save', (event, options) => {
   const result = store.saveCurrentConfigAsTheme(options);
   broadcastBookmarksUpdated(store.getBookmarks());
+  broadcastThemeChange(result);
+  return result;
+});
+
+// Customization (Accent Color & Wallpaper) IPC
+ipcMain.handle('customization:getAccentColors', () => store.getAccentColors());
+ipcMain.handle('customization:setAccentColor', (event, colorId) => {
+  const result = store.setAccentColor(colorId);
+  broadcastThemeChange(result);
+  return result;
+});
+ipcMain.handle('customization:setWallpaper', (event, wallpaperUrl) => {
+  const result = store.setWallpaper(wallpaperUrl);
+  broadcastThemeChange(result);
+  return result;
+});
+ipcMain.handle('customization:importWallpaper', async () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return { canceled: true };
+  const dialogResult = await dialog.showOpenDialog(mainWindow, {
+    title: 'Import Wallpaper Image',
+    properties: ['openFile'],
+    filters: [
+      { name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'avif'] }
+    ]
+  });
+  if (dialogResult.canceled || !dialogResult.filePaths || dialogResult.filePaths.length === 0) {
+    return { canceled: true };
+  }
+  const result = store.addCustomWallpaper(dialogResult.filePaths[0]);
+  if (result) {
+    broadcastThemeChange(result);
+  }
+  return result || { canceled: true };
+});
+ipcMain.handle('customization:removeWallpaper', (event, idOrUrl) => {
+  const result = store.removeCustomWallpaper(idOrUrl);
   broadcastThemeChange(result);
   return result;
 });
