@@ -1,6 +1,6 @@
 {
   "name": "oni-browser",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Oni Browser - Sleek, fierce, uncompromised web browser for Windows.",
   "main": "src/main/index.js",
   "author": "Oni Lab",
@@ -23,7 +23,8 @@
       {
         "provider": "github",
         "owner": "Oni-Dreamz",
-        "repo": "oni-browser"
+        "repo": "oni-browser",
+        "releaseType": "release"
       }
     ],
     "files": [
