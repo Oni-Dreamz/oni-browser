@@ -25,17 +25,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build and Package
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx electron-builder --win --publish always
+      - name: Build and Package Locally
+        run: npx electron-builder --win --publish never
 
-      - name: Publish Release
+      - name: Publish Single Release to GitHub
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
           draft: false
           prerelease: false
           generate_release_notes: true
+          files: |
+            dist/*.exe
+            dist/*.blockmap
+            dist/latest.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
