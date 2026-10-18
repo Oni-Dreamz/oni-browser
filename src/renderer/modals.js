@@ -554,15 +554,23 @@
 
   let activeSettingsSection = 'general';
 
-  // System Updates State
+  // System Updates State & General Nav Indicator
   let appVersion = '1.0.0';
   let updateState = {
     status: 'idle', // 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'error'
     percent: 0,
     downloadedVersion: '',
     errorMessage: '',
-    checkedOnce: false
+    checkedOnce: false,
+    hasUpdate: false
   };
+
+  function updateGeneralNavBadge() {
+    const badge = document.getElementById('os-settings-general-badge');
+    if (badge) {
+      badge.classList.toggle('hidden', !updateState.hasUpdate);
+    }
+  }
 
   function getUpdaterApi() {
     return (window.electronAPI && window.electronAPI.updater) || (window.oniAPI && window.oniAPI.updater);
@@ -638,8 +646,8 @@
             <div class="os-settings-group-label" style="margin-bottom: 2px; color: var(--accent-green);">SYSTEM UPDATES</div>
             <div class="os-update-version-subtitle" id="os-update-version">Current Version: v${escapeHtml(appVersion)}</div>
           </div>
-          <button type="button" class="os-update-btn ${updateState.status === 'downloaded' ? 'install-ready' : ''}" id="os-update-action-btn" ${updateState.status === 'checking' ? 'disabled' : ''}>
-            ${updateState.status === 'downloaded' ? '[ Restart & Install ]' : (updateState.status === 'checking' ? '[ Checking... ]' : '[ Check for Updates ]')}
+          <button type="button" class="os-update-btn ${updateState.status === 'downloaded' ? 'install-ready' : ''}" id="os-update-action-btn" ${updateState.status === 'checking' || updateState.status === 'downloading' ? 'disabled' : ''}>
+            ${updateState.status === 'downloaded' ? '[ Restart & Install ]' : (updateState.status === 'checking' ? '[ Checking... ]' : (updateState.status === 'downloading' ? '[ Downloading... ]' : '[ Check for Updates ]'))}
           </button>
         </div>
         <div class="os-update-status-row" id="os-update-status-row">
@@ -666,6 +674,10 @@
         actionBtn.disabled = false;
       } else if (updateState.status === 'checking') {
         actionBtn.textContent = '[ Checking... ]';
+        actionBtn.classList.remove('install-ready');
+        actionBtn.disabled = true;
+      } else if (updateState.status === 'downloading') {
+        actionBtn.textContent = '[ Downloading... ]';
         actionBtn.classList.remove('install-ready');
         actionBtn.disabled = true;
       } else {
@@ -702,6 +714,7 @@
           updateState.checkedOnce = true;
           updateState.isPortable = res.status === 'portable';
           updateState.errorMessage = '';
+          updateState.hasUpdate = false;
         } else if (res && res.status === 'success') {
           if (updateState.status === 'checking') {
             updateState.status = 'idle';
@@ -711,7 +724,9 @@
         } else if (res && res.status === 'error') {
           updateState.status = 'error';
           updateState.errorMessage = res.message || 'Unable to check for updates';
+          updateState.hasUpdate = false;
         }
+        updateGeneralNavBadge();
         updateDomUpdateCard(container);
       }
     } catch (err) {
@@ -720,6 +735,8 @@
         .replace(/^Error invoking remote method '[^']+':\s*/i, '')
         .replace(/^Error:\s*/i, '');
       updateState.errorMessage = cleanMsg;
+      updateState.hasUpdate = false;
+      updateGeneralNavBadge();
       updateDomUpdateCard(container);
     }
   }
@@ -757,32 +774,44 @@
       if (!data) return;
       const evt = data.event || data.status;
       if (evt === 'checking-for-update' || data.status === 'checking') {
-        updateState.status = 'checking';
-        updateState.errorMessage = '';
+        // Exception: "Scanning for Update" text is only displayed when manually clicking "Check For Updates"
+        if (data.isManual) {
+          updateState.status = 'checking';
+          updateState.errorMessage = '';
+        }
       } else if (evt === 'update-available' || data.status === 'available') {
         updateState.status = 'downloading';
+        updateState.hasUpdate = true;
         updateState.percent = 0;
         updateState.errorMessage = '';
       } else if (evt === 'update-not-available' || data.status === 'not-available') {
-        updateState.status = 'idle';
+        if (updateState.status !== 'downloaded' && updateState.status !== 'downloading') {
+          updateState.status = 'idle';
+          updateState.hasUpdate = false;
+        }
         updateState.checkedOnce = true;
         updateState.isPortable = data.status === 'portable' || (data.message && data.message.includes('Portable'));
         updateState.errorMessage = '';
       } else if (evt === 'download-progress' || data.status === 'downloading') {
         updateState.status = 'downloading';
+        updateState.hasUpdate = true;
         updateState.percent = data.percent || 0;
         updateState.errorMessage = '';
       } else if (evt === 'update-downloaded' || data.status === 'downloaded') {
         updateState.status = 'downloaded';
+        updateState.hasUpdate = true;
         updateState.downloadedVersion = data.version || (data.info && data.info.version) || '';
         updateState.errorMessage = '';
       } else if (evt === 'error' || data.status === 'error') {
-        updateState.status = 'error';
-        const cleanMsg = (data.message || 'Error checking for updates')
-          .replace(/^Error invoking remote method '[^']+':\s*/i, '')
-          .replace(/^Error:\s*/i, '');
-        updateState.errorMessage = cleanMsg;
+        if (data.isManual) {
+          updateState.status = 'error';
+          const cleanMsg = (data.message || 'Error checking for updates')
+            .replace(/^Error invoking remote method '[^']+':\s*/i, '')
+            .replace(/^Error:\s*/i, '');
+          updateState.errorMessage = cleanMsg;
+        }
       }
+      updateGeneralNavBadge();
       updateDomUpdateCard(settingsBody);
     });
   }
@@ -793,6 +822,26 @@
         appVersion = v;
         const verEl = document.getElementById('os-update-version');
         if (verEl) verEl.textContent = `Current Version: v${escapeHtml(appVersion)}`;
+      }
+    }).catch(() => {});
+  }
+
+  if (updaterApiInstance && updaterApiInstance.getUpdateStatus) {
+    updaterApiInstance.getUpdateStatus().then(st => {
+      if (st) {
+        if (st.status === 'downloaded') {
+          updateState.status = 'downloaded';
+          updateState.hasUpdate = true;
+          updateState.downloadedVersion = st.downloadedVersion || '';
+        } else if (st.status === 'downloading' || st.status === 'available') {
+          updateState.status = 'downloading';
+          updateState.hasUpdate = true;
+          updateState.percent = st.percent || 0;
+        } else if (st.hasUpdate) {
+          updateState.hasUpdate = true;
+        }
+        updateGeneralNavBadge();
+        updateDomUpdateCard(settingsBody);
       }
     }).catch(() => {});
   }
@@ -950,6 +999,7 @@
               <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
             </svg>
             <span>General</span>
+            <span class="os-update-indicator-dot ${updateState.hasUpdate ? '' : 'hidden'}" id="os-settings-general-badge" title="Update available"></span>
           </button>
           <button type="button" class="os-settings-nav-item ${activeSettingsSection === 'customization' ? 'active' : ''}" data-section="customization">
             <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

@@ -109,13 +109,31 @@ function sendToChromeAndDock(channel, payload) {
   }
 }
 
-// electron-updater configuration & event forwarding
+// electron-updater configuration, background service & event forwarding
 autoUpdater.autoDownload = true;
 autoUpdater.logger = {
   info: (msg) => console.log('[AutoUpdater]', msg),
   warn: (msg) => console.warn('[AutoUpdater]', msg),
   error: (msg) => console.error('[AutoUpdater]', msg)
 };
+
+const currentUpdateState = {
+  status: 'idle', // 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'error'
+  percent: 0,
+  downloadedVersion: '',
+  availableVersion: '',
+  errorMessage: '',
+  hasUpdate: false,
+  checkedOnce: false,
+  isPortable: false
+};
+let isCheckingForUpdates = false;
+let isManualUpdateCheck = false;
+let backgroundUpdateTimer = null;
+let initialBackgroundCheckTimeout = null;
+
+const INITIAL_UPDATE_CHECK_DELAY_MS = 15 * 1000; // 15 seconds after launch
+const BACKGROUND_UPDATE_INTERVAL_MS = 60 * 60 * 1000; // Check periodically every 1 hour
 
 function broadcastUpdaterEvent(data) {
   try {
@@ -136,35 +154,59 @@ function broadcastUpdaterEvent(data) {
 }
 
 autoUpdater.on('checking-for-update', () => {
+  if (isManualUpdateCheck) {
+    currentUpdateState.status = 'checking';
+    currentUpdateState.errorMessage = '';
+  }
   broadcastUpdaterEvent({
     event: 'checking-for-update',
-    status: 'checking'
+    status: 'checking',
+    isManual: isManualUpdateCheck
   });
 });
 
 autoUpdater.on('update-available', (info) => {
+  currentUpdateState.status = 'downloading';
+  currentUpdateState.hasUpdate = true;
+  currentUpdateState.availableVersion = (info && info.version) || '';
+  currentUpdateState.checkedOnce = true;
+  currentUpdateState.errorMessage = '';
   broadcastUpdaterEvent({
     event: 'update-available',
     status: 'available',
     info,
-    version: info && info.version
+    version: info && info.version,
+    hasUpdate: true,
+    isManual: isManualUpdateCheck
   });
 });
 
 autoUpdater.on('update-not-available', (info) => {
+  currentUpdateState.checkedOnce = true;
+  if (currentUpdateState.status !== 'downloaded' && currentUpdateState.status !== 'downloading') {
+    currentUpdateState.status = 'idle';
+    currentUpdateState.hasUpdate = false;
+  }
   broadcastUpdaterEvent({
     event: 'update-not-available',
     status: 'not-available',
     info,
-    version: info && info.version
+    version: info && info.version,
+    hasUpdate: currentUpdateState.hasUpdate,
+    isManual: isManualUpdateCheck
   });
 });
 
 autoUpdater.on('download-progress', (progressObj) => {
+  currentUpdateState.status = 'downloading';
+  currentUpdateState.hasUpdate = true;
+  currentUpdateState.percent = Math.round((progressObj && progressObj.percent) || 0);
   broadcastUpdaterEvent({
     event: 'download-progress',
     status: 'downloading',
-    percent: Math.round((progressObj && progressObj.percent) || 0),
+    percent: currentUpdateState.percent,
+    hasUpdate: true,
+    isManual: isManualUpdateCheck,
     transferred: progressObj && progressObj.transferred,
     total: progressObj && progressObj.total,
     bytesPerSecond: progressObj && progressObj.bytesPerSecond
@@ -172,21 +214,182 @@ autoUpdater.on('download-progress', (progressObj) => {
 });
 
 autoUpdater.on('update-downloaded', (info) => {
+  currentUpdateState.status = 'downloaded';
+  currentUpdateState.hasUpdate = true;
+  currentUpdateState.downloadedVersion = (info && info.version) || '';
+  currentUpdateState.checkedOnce = true;
+  currentUpdateState.errorMessage = '';
   broadcastUpdaterEvent({
     event: 'update-downloaded',
     status: 'downloaded',
     info,
-    version: info && info.version
+    version: info && info.version,
+    hasUpdate: true,
+    isManual: isManualUpdateCheck
   });
 });
 
 autoUpdater.on('error', (err) => {
-  broadcastUpdaterEvent({
-    event: 'error',
-    status: 'error',
-    message: err && err.message ? err.message : String(err)
-  });
+  const cleanMsg = (err?.message || String(err || 'Error checking for updates'))
+    .replace(/^Error invoking remote method '[^']+':\s*/i, '')
+    .replace(/^Error:\s*/i, '');
+  if (isManualUpdateCheck) {
+    currentUpdateState.status = 'error';
+    currentUpdateState.errorMessage = cleanMsg;
+    broadcastUpdaterEvent({
+      event: 'error',
+      status: 'error',
+      message: cleanMsg,
+      isManual: true
+    });
+  } else {
+    console.log('[AutoUpdater] Background check note:', cleanMsg);
+  }
 });
+
+async function checkForUpdatesInternal(isManual = false) {
+  if (isCheckingForUpdates) {
+    return { status: currentUpdateState.status, alreadyChecking: true };
+  }
+  if (currentUpdateState.status === 'downloaded') {
+    if (isManual) {
+      broadcastUpdaterEvent({
+        event: 'update-downloaded',
+        status: 'downloaded',
+        version: currentUpdateState.downloadedVersion,
+        hasUpdate: true,
+        isManual: true
+      });
+      return { status: 'downloaded', version: currentUpdateState.downloadedVersion };
+    }
+    return { status: 'downloaded', version: currentUpdateState.downloadedVersion };
+  }
+
+  isCheckingForUpdates = true;
+  isManualUpdateCheck = !!isManual;
+
+  if (isManual) {
+    currentUpdateState.status = 'checking';
+    currentUpdateState.errorMessage = '';
+    broadcastUpdaterEvent({
+      event: 'checking-for-update',
+      status: 'checking',
+      isManual: true
+    });
+  }
+
+  // Check if running as portable standalone edition or without update config
+  const hasAppUpdateYml = fs.existsSync(path.join(process.resourcesPath || '', 'app-update.yml'));
+  const hasDevAppUpdateYml = fs.existsSync(path.join(__dirname, '../../dev-app-update.yml')) ||
+    fs.existsSync(path.join(process.cwd(), 'dev-app-update.yml'));
+  const isPortable = !!process.env.PORTABLE_EXECUTABLE_DIR ||
+    (process.execPath && /standalone|portable/i.test(process.execPath)) ||
+    (app.isPackaged && !hasAppUpdateYml);
+
+  if (isPortable) {
+    isCheckingForUpdates = false;
+    currentUpdateState.isPortable = true;
+    currentUpdateState.checkedOnce = true;
+    if (currentUpdateState.status !== 'downloaded') currentUpdateState.status = 'idle';
+    const portableMsg = 'Oni Browser Portable Standalone is running the latest build.';
+    if (isManual) {
+      broadcastUpdaterEvent({
+        event: 'update-not-available',
+        status: 'not-available',
+        message: portableMsg,
+        version: app.getVersion(),
+        isManual: true
+      });
+      return {
+        status: 'portable',
+        message: portableMsg,
+        version: app.getVersion()
+      };
+    }
+    return { status: 'portable' };
+  }
+
+  if (!app.isPackaged && !hasDevAppUpdateYml) {
+    isCheckingForUpdates = false;
+    currentUpdateState.checkedOnce = true;
+    if (currentUpdateState.status !== 'downloaded') currentUpdateState.status = 'idle';
+    const devMsg = 'Development build (v' + app.getVersion() + ') is active.';
+    if (isManual) {
+      broadcastUpdaterEvent({
+        event: 'update-not-available',
+        status: 'not-available',
+        message: devMsg,
+        version: app.getVersion(),
+        isManual: true
+      });
+      return {
+        status: 'dev',
+        message: devMsg,
+        version: app.getVersion()
+      };
+    }
+    return { status: 'dev' };
+  }
+
+  try {
+    const res = await autoUpdater.checkForUpdates();
+    isCheckingForUpdates = false;
+    return {
+      status: 'success',
+      updateInfo: res?.updateInfo
+    };
+  } catch (err) {
+    isCheckingForUpdates = false;
+    const cleanMsg = (err?.message || 'Update check failed')
+      .replace(/^Error invoking remote method '[^']+':\s*/i, '')
+      .replace(/^Error:\s*/i, '');
+    if (isManual) {
+      currentUpdateState.status = 'error';
+      currentUpdateState.errorMessage = cleanMsg;
+      broadcastUpdaterEvent({
+        event: 'error',
+        status: 'error',
+        message: cleanMsg,
+        isManual: true
+      });
+      return {
+        status: 'error',
+        message: cleanMsg
+      };
+    } else {
+      console.log('[AutoUpdater] Background check skipped/offline:', cleanMsg);
+      return { status: 'offline' };
+    }
+  }
+}
+
+function startBackgroundUpdateService() {
+  stopBackgroundUpdateService();
+  // Initial check shortly after browser startup
+  initialBackgroundCheckTimeout = setTimeout(() => {
+    checkForUpdatesInternal(false).catch((err) => {
+      console.log('[AutoUpdater] Background initial check note:', err?.message || err);
+    });
+  }, INITIAL_UPDATE_CHECK_DELAY_MS);
+
+  // Consistent background interval checks
+  backgroundUpdateTimer = setInterval(() => {
+    checkForUpdatesInternal(false).catch((err) => {
+      console.log('[AutoUpdater] Background periodic check note:', err?.message || err);
+    });
+  }, BACKGROUND_UPDATE_INTERVAL_MS);
+}
+
+function stopBackgroundUpdateService() {
+  if (initialBackgroundCheckTimeout) {
+    clearTimeout(initialBackgroundCheckTimeout);
+    initialBackgroundCheckTimeout = null;
+  }
+  if (backgroundUpdateTimer) {
+    clearInterval(backgroundUpdateTimer);
+    backgroundUpdateTimer = null;
+  }
+}
 
 function updateModalsViewBounds() {
   if (!mainWindow || mainWindow.isDestroyed() || !modalsView) return;
@@ -1394,14 +1597,8 @@ app.whenReady().then(() => {
 
   createWindow();
 
-  // On app startup, trigger a silent autoUpdater.checkForUpdatesAndNotify()
-  try {
-    autoUpdater.checkForUpdatesAndNotify().catch((err) => {
-      console.warn('[AutoUpdater] Startup update check failed:', err.message);
-    });
-  } catch (err) {
-    console.warn('[AutoUpdater] Startup update check exception:', err.message);
-  }
+  // Launch continuous background update service
+  startBackgroundUpdateService();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -1411,6 +1608,7 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+  stopBackgroundUpdateService();
   if (process.platform !== 'darwin') {
     app.quit();
   }
@@ -1418,63 +1616,14 @@ app.on('window-all-closed', () => {
 
 // IPC Handlers
 ipcMain.handle('check-for-updates', async () => {
-  // Check if running as portable standalone edition or without update config
-  const hasAppUpdateYml = fs.existsSync(path.join(process.resourcesPath || '', 'app-update.yml'));
-  const isPortable = !!process.env.PORTABLE_EXECUTABLE_DIR ||
-    (process.execPath && /standalone|portable/i.test(process.execPath)) ||
-    (app.isPackaged && !hasAppUpdateYml);
+  return await checkForUpdatesInternal(true);
+});
 
-  if (isPortable) {
-    const portableMsg = 'Oni Browser Portable Standalone is running the latest build.';
-    broadcastUpdaterEvent({
-      event: 'update-not-available',
-      status: 'not-available',
-      message: portableMsg,
-      version: app.getVersion()
-    });
-    return {
-      status: 'portable',
-      message: portableMsg,
-      version: app.getVersion()
-    };
-  }
-
-  if (!app.isPackaged) {
-    const devMsg = 'Development build (v' + app.getVersion() + ') is active.';
-    broadcastUpdaterEvent({
-      event: 'update-not-available',
-      status: 'not-available',
-      message: devMsg,
-      version: app.getVersion()
-    });
-    return {
-      status: 'dev',
-      message: devMsg,
-      version: app.getVersion()
-    };
-  }
-
-  try {
-    const res = await autoUpdater.checkForUpdates();
-    return {
-      status: 'success',
-      updateInfo: res?.updateInfo
-    };
-  } catch (err) {
-    console.warn('[AutoUpdater] Manual check error:', err.message);
-    const cleanMsg = (err?.message || 'Update check failed')
-      .replace(/^Error invoking remote method '[^']+':\s*/i, '')
-      .replace(/^Error:\s*/i, '');
-    broadcastUpdaterEvent({
-      event: 'error',
-      status: 'error',
-      message: cleanMsg
-    });
-    return {
-      status: 'error',
-      message: cleanMsg
-    };
-  }
+ipcMain.handle('get-update-status', () => {
+  return {
+    ...currentUpdateState,
+    appVersion: app.getVersion()
+  };
 });
 
 ipcMain.handle('install-update', () => {

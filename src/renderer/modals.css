@@ -426,6 +426,38 @@ html, body {
   opacity: 1;
 }
 
+/* System Update Notification Indicator Dot */
+.os-update-indicator-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background-color: var(--accent-green, #00ff88);
+  box-shadow: 0 0 8px var(--accent-green, #00ff88), 0 0 12px rgba(0, 255, 136, 0.5);
+  animation: os-update-dot-pulse 2s infinite ease-in-out;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+@keyframes os-update-dot-pulse {
+  0% {
+    transform: scale(0.9);
+    box-shadow: 0 0 4px var(--accent-green, #00ff88);
+  }
+  50% {
+    transform: scale(1.2);
+    box-shadow: 0 0 10px var(--accent-green, #00ff88), 0 0 14px rgba(0, 255, 136, 0.6);
+  }
+  100% {
+    transform: scale(0.9);
+    box-shadow: 0 0 4px var(--accent-green, #00ff88);
+  }
+}
+
+.os-settings-nav-item .os-update-indicator-dot {
+  margin-left: auto;
+}
+
 .os-settings-canvas {
   flex: 1;
   padding: 18px 20px;

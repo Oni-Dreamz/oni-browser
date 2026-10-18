@@ -779,7 +779,15 @@
 
     btnHistory.addEventListener('click', () => openOverlay('history'));
     btnBookmarksPanel.addEventListener('click', () => openOverlay('bookmarks'));
-    btnSettings.addEventListener('click', () => openOverlay('settings'));
+    btnSettings.addEventListener('click', () => {
+      if (currentTheme && (currentTheme.id === 'oni-os' || currentTheme.chrome?.layout?.showOsMenubar)) {
+        if (window.oniAPI && window.oniAPI.triggerOsAction) {
+          window.oniAPI.triggerOsAction('settings');
+          return;
+        }
+      }
+      openOverlay('settings');
+    });
 
     // Close flyouts on outside click
     document.addEventListener('pointerdown', (e) => {
@@ -881,18 +889,27 @@
   modalClose.addEventListener('click', closeOverlay);
   overlayBackdrop.addEventListener('click', closeOverlay);
 
-  // System Updates State
+  // System Updates State & Notification Indicator
   let appVersion = '1.0.0';
   let updateState = {
     status: 'idle',
     percent: 0,
     downloadedVersion: '',
     errorMessage: '',
-    checkedOnce: false
+    checkedOnce: false,
+    hasUpdate: false
   };
 
   function getUpdaterApi() {
     return (window.electronAPI && window.electronAPI.updater) || (window.oniAPI && window.oniAPI.updater);
+  }
+
+  function updateTopBarSettingsBadge() {
+    const btnBadge = document.getElementById('btn-settings-badge');
+    const osMenuBadge = document.getElementById('os-settings-badge');
+    const show = !!updateState.hasUpdate;
+    if (btnBadge) btnBadge.classList.toggle('hidden', !show);
+    if (osMenuBadge) osMenuBadge.classList.toggle('hidden', !show);
   }
 
   function escapeHtml(str) {
@@ -963,8 +980,8 @@
             <div class="os-settings-group-label" style="margin-bottom: 2px; color: var(--accent-green);">SYSTEM UPDATES</div>
             <div class="os-update-version-subtitle" id="os-update-version">Current Version: v${escapeHtml(appVersion)}</div>
           </div>
-          <button type="button" class="os-update-btn ${updateState.status === 'downloaded' ? 'install-ready' : ''}" id="os-update-action-btn" ${updateState.status === 'checking' ? 'disabled' : ''}>
-            ${updateState.status === 'downloaded' ? '[ Restart & Install ]' : (updateState.status === 'checking' ? '[ Checking... ]' : '[ Check for Updates ]')}
+          <button type="button" class="os-update-btn ${updateState.status === 'downloaded' ? 'install-ready' : ''}" id="os-update-action-btn" ${updateState.status === 'checking' || updateState.status === 'downloading' ? 'disabled' : ''}>
+            ${updateState.status === 'downloaded' ? '[ Restart & Install ]' : (updateState.status === 'checking' ? '[ Checking... ]' : (updateState.status === 'downloading' ? '[ Downloading... ]' : '[ Check for Updates ]'))}
           </button>
         </div>
         <div class="os-update-status-row" id="os-update-status-row">
@@ -991,6 +1008,10 @@
         actionBtn.disabled = false;
       } else if (updateState.status === 'checking') {
         actionBtn.textContent = '[ Checking... ]';
+        actionBtn.classList.remove('install-ready');
+        actionBtn.disabled = true;
+      } else if (updateState.status === 'downloading') {
+        actionBtn.textContent = '[ Downloading... ]';
         actionBtn.classList.remove('install-ready');
         actionBtn.disabled = true;
       } else {
@@ -1027,6 +1048,7 @@
           updateState.checkedOnce = true;
           updateState.isPortable = res.status === 'portable';
           updateState.errorMessage = '';
+          updateState.hasUpdate = false;
         } else if (res && res.status === 'success') {
           if (updateState.status === 'checking') {
             updateState.status = 'idle';
@@ -1036,7 +1058,9 @@
         } else if (res && res.status === 'error') {
           updateState.status = 'error';
           updateState.errorMessage = res.message || 'Unable to check for updates';
+          updateState.hasUpdate = false;
         }
+        updateTopBarSettingsBadge();
         updateDomUpdateCard(container);
       }
     } catch (err) {
@@ -1045,6 +1069,8 @@
         .replace(/^Error invoking remote method '[^']+':\s*/i, '')
         .replace(/^Error:\s*/i, '');
       updateState.errorMessage = cleanMsg;
+      updateState.hasUpdate = false;
+      updateTopBarSettingsBadge();
       updateDomUpdateCard(container);
     }
   }
@@ -1081,28 +1107,40 @@
       if (!data) return;
       const evt = data.event || data.status;
       if (evt === 'checking-for-update' || data.status === 'checking') {
-        updateState.status = 'checking';
-        updateState.errorMessage = '';
+        // Exception: "Scanning for Update" text is only displayed when manually clicking "Check For Updates"
+        if (data.isManual) {
+          updateState.status = 'checking';
+          updateState.errorMessage = '';
+        }
       } else if (evt === 'update-available' || data.status === 'available') {
         updateState.status = 'downloading';
+        updateState.hasUpdate = true;
         updateState.percent = 0;
         updateState.errorMessage = '';
       } else if (evt === 'update-not-available' || data.status === 'not-available') {
-        updateState.status = 'idle';
+        if (updateState.status !== 'downloaded' && updateState.status !== 'downloading') {
+          updateState.status = 'idle';
+          updateState.hasUpdate = false;
+        }
         updateState.checkedOnce = true;
         updateState.errorMessage = '';
       } else if (evt === 'download-progress' || data.status === 'downloading') {
         updateState.status = 'downloading';
+        updateState.hasUpdate = true;
         updateState.percent = data.percent || 0;
         updateState.errorMessage = '';
       } else if (evt === 'update-downloaded' || data.status === 'downloaded') {
         updateState.status = 'downloaded';
+        updateState.hasUpdate = true;
         updateState.downloadedVersion = data.version || (data.info && data.info.version) || '';
         updateState.errorMessage = '';
       } else if (evt === 'error' || data.status === 'error') {
-        updateState.status = 'error';
-        updateState.errorMessage = data.message || 'Error checking for updates';
+        if (data.isManual) {
+          updateState.status = 'error';
+          updateState.errorMessage = data.message || 'Error checking for updates';
+        }
       }
+      updateTopBarSettingsBadge();
       updateDomUpdateCard(modalContent);
     });
   }
@@ -1113,6 +1151,26 @@
         appVersion = v;
         const verEl = document.getElementById('os-update-version');
         if (verEl) verEl.textContent = `Current Version: v${escapeHtml(appVersion)}`;
+      }
+    }).catch(() => {});
+  }
+
+  if (updaterApiInstance && updaterApiInstance.getUpdateStatus) {
+    updaterApiInstance.getUpdateStatus().then(st => {
+      if (st) {
+        if (st.status === 'downloaded') {
+          updateState.status = 'downloaded';
+          updateState.hasUpdate = true;
+          updateState.downloadedVersion = st.downloadedVersion || '';
+        } else if (st.status === 'downloading' || st.status === 'available') {
+          updateState.status = 'downloading';
+          updateState.hasUpdate = true;
+          updateState.percent = st.percent || 0;
+        } else if (st.hasUpdate) {
+          updateState.hasUpdate = true;
+        }
+        updateTopBarSettingsBadge();
+        updateDomUpdateCard(modalContent);
       }
     }).catch(() => {});
   }

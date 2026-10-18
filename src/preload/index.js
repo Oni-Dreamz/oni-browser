@@ -5,6 +5,7 @@ if (window.location.protocol === 'file:') {
     checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
     installUpdate: () => ipcRenderer.invoke('install-update'),
     getVersion: () => ipcRenderer.invoke('get-app-version'),
+    getUpdateStatus: () => ipcRenderer.invoke('get-update-status'),
     onUpdaterEvent: (callback) => ipcRenderer.on('updater-event', (_event, value) => callback(value))
   };
 
