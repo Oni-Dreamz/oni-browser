@@ -8,14 +8,17 @@
   "scripts": {
     "start": "electron .",
     "make-ico": "electron scripts/make-ico.js",
-    "build:installer": "node --use-system-ca ./node_modules/electron-builder/cli.js --win nsis",
-    "build:portable": "node --use-system-ca ./node_modules/electron-builder/cli.js --win portable",
-    "build": "node --use-system-ca ./node_modules/electron-builder/cli.js --win nsis"
+    "build:installer": "node scripts/build.js --installer",
+    "build:portable": "node scripts/build.js --portable",
+    "build:all": "node scripts/build.js --all",
+    "build": "node scripts/build.js --installer",
+    "clean:dist": "node scripts/clean-dist.js"
   },
   "build": {
     "appId": "com.onilab.onibrowser",
     "productName": "Oni Browser",
     "copyright": "Copyright © 2026 Oni Lab",
+    "afterAllArtifactBuild": "scripts/clean-dist.js",
     "directories": {
       "output": "dist"
     },
