@@ -263,20 +263,25 @@ if (window.location.protocol === 'file:') {
         }
       } catch (e) {}
 
-      // 3. Populate plugins array if empty
+      // 3. Ensure authentic userAgentData brands including Google Chrome for DRM & streaming compatibility
       try {
-        if (!navigator.plugins || navigator.plugins.length === 0) {
-          const pluginsArray = [
-            { name: 'PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
-            { name: 'Chrome PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
-            { name: 'Chromium PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
-            { name: 'Microsoft Edge PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
-            { name: 'WebKit built-in PDF', filename: 'internal-pdf-viewer', description: 'Portable Document Format' }
-          ];
-          Object.defineProperty(Object.getPrototypeOf(navigator), 'plugins', {
-            get: () => pluginsArray,
-            configurable: true
-          });
+        if (navigator.userAgentData && Array.isArray(navigator.userAgentData.brands)) {
+          const chromeMajor = (navigator.userAgent.match(/Chrome\/(\d+)/) || [null, '132'])[1];
+          const hasChrome = navigator.userAgentData.brands.some(b => b.brand === 'Google Chrome');
+          if (!hasChrome) {
+            const patchedBrands = [
+              { brand: 'Not)A:Brand', version: '99' },
+              { brand: 'Google Chrome', version: chromeMajor },
+              { brand: 'Chromium', version: chromeMajor }
+            ];
+            try {
+              Object.defineProperty(navigator.userAgentData, 'brands', {
+                get: () => patchedBrands,
+                configurable: true,
+                enumerable: true
+              });
+            } catch (e) {}
+          }
         }
       } catch (e) {}
     `;

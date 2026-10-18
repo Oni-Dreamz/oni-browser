@@ -1,4 +1,4 @@
-const { app, BrowserWindow, WebContentsView, ipcMain, shell, Menu, MenuItem, session, clipboard, dialog } = require('electron');
+const { app, BrowserWindow, WebContentsView, ipcMain, shell, Menu, MenuItem, session, clipboard, dialog, components } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fs = require('fs');
@@ -7,6 +7,14 @@ const oniShield = require('./adblock');
 
 // Disable Blink automation features so navigator.webdriver is not flagged by Turnstile/Cloudflare
 app.commandLine.appendSwitch('disable-blink-features', 'AutomationControlled');
+// Enable media & hardware video acceleration features for DRM and 4K/1080p playback
+app.commandLine.appendSwitch('enable-features', 'PlatformHEVCDecoderSupport');
+
+// Standard authentic Google Chrome User-Agent and Client Hints
+const chromeVer = process.versions.chrome || '132.0.0.0';
+const desktopChromeUa = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVer} Safari/537.36`;
+const chromeMajor = chromeVer.split('.')[0];
+const standardSecChUa = `"Not)A:Brand";v="99", "Google Chrome";v="${chromeMajor}", "Chromium";v="${chromeMajor}"`;
 
 // Helper to extract incoming URL or file path from command line arguments
 function extractUrlFromArgs(args) {
@@ -862,9 +870,16 @@ function createTab(initialUrl = 'oni://newtab', options = {}) {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
-      spellcheck: true
+      spellcheck: true,
+      plugins: true,
+      webgl: true,
+      backgroundThrottling: false,
+      autoplayPolicy: 'no-user-gesture-required'
     }
   });
+  try {
+    view.webContents.setUserAgent(desktopChromeUa);
+  } catch (e) {}
   try {
     view.setBackgroundColor('#08090d');
   } catch (e) {}
@@ -1572,21 +1587,35 @@ function createWindow() {
 }
 
 // App lifecycle
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  // Initialize Widevine CDM components for DRM streaming services (YouTube TV, Netflix, Disney+, Hulu, etc.)
   try {
-    const chromeVer = process.versions.chrome || '132.0.0.0';
-    const desktopChromeUa = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVer} Safari/537.36`;
+    if (components) {
+      console.log('[DRM] Initializing Widevine CDM components...');
+      await Promise.race([
+        components.whenReady(),
+        new Promise((resolve) => setTimeout(resolve, 8000))
+      ]);
+      console.log('[DRM] Widevine CDM status:', JSON.stringify(components.status()));
+    }
+  } catch (err) {
+    console.warn('[DRM] Widevine CDM initialization notice:', err.message);
+  }
+
+  try {
     session.defaultSession.setUserAgent(desktopChromeUa);
 
     // Sanitize request headers so Cloudflare and modern sites receive authentic Google Chrome Client Hints
-    const chromeMajor = chromeVer.split('.')[0];
-    const standardSecChUa = `"Not A(Brand";v="8", "Chromium";v="${chromeMajor}", "Google Chrome";v="${chromeMajor}"`;
     session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
       const requestHeaders = details.requestHeaders || {};
       for (const key of Object.keys(requestHeaders)) {
         const lowerKey = key.toLowerCase();
         if (lowerKey === 'sec-ch-ua') {
           requestHeaders[key] = standardSecChUa;
+        } else if (lowerKey === 'sec-ch-ua-platform') {
+          requestHeaders[key] = '"Windows"';
+        } else if (lowerKey === 'sec-ch-ua-mobile') {
+          requestHeaders[key] = '?0';
         } else if (lowerKey === 'user-agent') {
           requestHeaders[key] = desktopChromeUa;
         }

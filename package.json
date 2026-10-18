@@ -22,6 +22,9 @@
     "directories": {
       "output": "dist"
     },
+    "electronDownload": {
+      "mirror": "https://github.com/castlabs/electron-releases/releases/download/"
+    },
     "publish": [
       {
         "provider": "github",
@@ -91,7 +94,7 @@
     "electron-updater": "^6.3.0"
   },
   "devDependencies": {
-    "electron": "^44.7.2",
+    "electron": "github:castlabs/electron-releases#v44.5.1+wvcus",
     "electron-builder": "^26.15.3",
     "png-to-ico": "^3.0.2"
   }
