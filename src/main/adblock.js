@@ -46,8 +46,15 @@ class OniShield {
         return;
       }
 
-      // Never block Cloudflare Turnstile or security challenge requests
-      if (details.url && (details.url.includes('/cdn-cgi/') || details.url.includes('challenges.cloudflare.com') || details.url.includes('turnstile'))) {
+      // Never block Cloudflare Turnstile, Google authentication, or security challenge requests
+      if (details.url && (
+        details.url.includes('/cdn-cgi/') ||
+        details.url.includes('challenges.cloudflare.com') ||
+        details.url.includes('turnstile') ||
+        details.url.includes('accounts.google.com') ||
+        details.url.includes('/recaptcha/') ||
+        details.url.includes('gstatic.com/recaptcha')
+      )) {
         callback({ cancel: false });
         return;
       }

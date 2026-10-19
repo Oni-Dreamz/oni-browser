@@ -219,74 +219,68 @@ if (window.location.protocol === 'file:') {
     }
   });
 } else {
-  // Web page execution (e.g. SteamDB, Turnstile, Cloudflare challenges)
-  // Ensure authentic Google Chrome runtime properties in main world (world 0)
+  // Web page execution (e.g. SteamDB, Turnstile, Cloudflare challenges, DRM)
   try {
-    const stealthCode = `
-      // 1. Remove automation / webdriver flag
-      try {
-        delete Object.getPrototypeOf(navigator).webdriver;
-        Object.defineProperty(Object.getPrototypeOf(navigator), 'webdriver', {
-          get: () => undefined,
-          configurable: true,
-          enumerable: true
-        });
-      } catch (e) {}
+    const host = (window.location && window.location.hostname) ? window.location.hostname.toLowerCase() : '';
+    const isGoogleAuthOrService =
+      host === 'accounts.google.com' ||
+      host.endsWith('.accounts.google.com') ||
+      host === 'accounts.youtube.com' ||
+      host === 'google.com' ||
+      host.endsWith('.google.com') ||
+      host === 'gstatic.com' ||
+      host.endsWith('.gstatic.com') ||
+      host === 'googleusercontent.com' ||
+      host.endsWith('.googleusercontent.com') ||
+      host === 'youtube.com' ||
+      host.endsWith('.youtube.com');
 
-      // 2. Standard Google Chrome window.chrome object
-      try {
-        if (!window.chrome) {
-          window.chrome = {};
-        }
-        if (!window.chrome.runtime) {
-          window.chrome.runtime = {
-            OnInstalledReason: { CHROME_UPDATE: 'chrome_update', INSTALL: 'install', SHARED_MODULE_UPDATE: 'shared_module_update', UPDATE: 'update' },
-            OnRestartRequiredReason: { APP_UPDATE: 'app_update', OS_UPDATE: 'os_update', PERIODIC: 'periodic' },
-            PlatformArch: { ARM: 'arm', ARM64: 'arm64', MIPS: 'mips', MIPS64: 'mips64', X86_32: 'x86-32', X86_64: 'x86-64' },
-            PlatformNaclArch: { ARM: 'arm', MIPS: 'mips', MIPS64: 'mips64', X86_32: 'x86-32', X86_64: 'x86-64' },
-            PlatformOs: { ANDROID: 'android', CROS: 'cros', LINUX: 'linux', MAC: 'mac', OPENBSD: 'openbsd', WIN: 'win' },
-            RequestUpdateCheckStatus: { NO_UPDATE: 'no_update', THROTTLED: 'throttled', UPDATE_AVAILABLE: 'update_available' },
-            connect: function () {},
-            sendMessage: function () {}
-          };
-        }
-        if (!window.chrome.app) {
-          window.chrome.app = {
-            isInstalled: false,
-            InstallState: { DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' },
-            RunningState: { CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running' },
-            getDetails: function () {},
-            getIsInstalled: function () {},
-            installState: function () {},
-            runningState: function () {}
-          };
-        }
-      } catch (e) {}
-
-      // 3. Ensure authentic userAgentData brands including Google Chrome for DRM & streaming compatibility
-      try {
-        if (navigator.userAgentData && Array.isArray(navigator.userAgentData.brands)) {
-          const chromeMajor = (navigator.userAgent.match(/Chrome\/(\d+)/) || [null, '132'])[1];
-          const hasChrome = navigator.userAgentData.brands.some(b => b.brand === 'Google Chrome');
-          if (!hasChrome) {
-            const patchedBrands = [
-              { brand: 'Not)A:Brand', version: '99' },
-              { brand: 'Google Chrome', version: chromeMajor },
-              { brand: 'Chromium', version: chromeMajor }
-            ];
-            try {
-              Object.defineProperty(navigator.userAgentData, 'brands', {
-                get: () => patchedBrands,
-                configurable: true,
-                enumerable: true
-              });
-            } catch (e) {}
+    // Never inject synthetic Chrome overrides on Google authentication/service domains
+    if (!isGoogleAuthOrService) {
+      const stealthCode = `
+        // Standard Google Chrome window.chrome object
+        try {
+          if (!window.chrome) {
+            window.chrome = {};
           }
-        }
-      } catch (e) {}
-    `;
-    if (webFrame && webFrame.executeJavaScriptInIsolatedWorld) {
-      webFrame.executeJavaScriptInIsolatedWorld(0, [{ code: stealthCode }]);
+          if (!window.chrome.app) {
+            window.chrome.app = {
+              isInstalled: false,
+              InstallState: { DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' },
+              RunningState: { CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running' },
+              getDetails: function () {},
+              getIsInstalled: function () {},
+              installState: function () {},
+              runningState: function () {}
+            };
+          }
+        } catch (e) {}
+
+        // Ensure authentic userAgentData brands including Google Chrome for DRM & streaming compatibility
+        try {
+          if (navigator.userAgentData && Array.isArray(navigator.userAgentData.brands)) {
+            const chromeMajor = (navigator.userAgent.match(/Chrome\\/(\\d+)/) || [null, '132'])[1];
+            const hasChrome = navigator.userAgentData.brands.some(b => b.brand === 'Google Chrome');
+            if (!hasChrome) {
+              const patchedBrands = [
+                { brand: 'Not)A:Brand', version: '99' },
+                { brand: 'Google Chrome', version: chromeMajor },
+                { brand: 'Chromium', version: chromeMajor }
+              ];
+              try {
+                Object.defineProperty(navigator.userAgentData, 'brands', {
+                  get: () => patchedBrands,
+                  configurable: true,
+                  enumerable: true
+                });
+              } catch (e) {}
+            }
+          }
+        } catch (e) {}
+      `;
+      if (webFrame && webFrame.executeJavaScriptInIsolatedWorld) {
+        webFrame.executeJavaScriptInIsolatedWorld(0, [{ code: stealthCode }]);
+      }
     }
   } catch (err) {}
 }

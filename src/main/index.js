@@ -15,6 +15,31 @@ const chromeVer = process.versions.chrome || '132.0.0.0';
 const desktopChromeUa = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVer} Safari/537.36`;
 const chromeMajor = chromeVer.split('.')[0];
 const standardSecChUa = `"Not)A:Brand";v="99", "Google Chrome";v="${chromeMajor}", "Chromium";v="${chromeMajor}"`;
+const googleAuthUa = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:134.0) Gecko/20100101 Firefox/134.0';
+
+function isGoogleAuthUrl(url) {
+  if (!url || typeof url !== 'string') return false;
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return (
+      host === 'google.com' ||
+      host.endsWith('.google.com') ||
+      host === 'gstatic.com' ||
+      host.endsWith('.gstatic.com') ||
+      host === 'googleusercontent.com' ||
+      host.endsWith('.googleusercontent.com') ||
+      host === 'youtube.com' ||
+      host.endsWith('.youtube.com')
+    );
+  } catch (e) {
+    return (
+      url.includes('google.com') ||
+      url.includes('gstatic.com') ||
+      url.includes('googleusercontent.com') ||
+      url.includes('youtube.com')
+    );
+  }
+}
 
 // Helper to extract incoming URL or file path from command line arguments
 function extractUrlFromArgs(args) {
@@ -1602,22 +1627,63 @@ app.whenReady().then(async () => {
     console.warn('[DRM] Widevine CDM initialization notice:', err.message);
   }
 
-  try {
-    session.defaultSession.setUserAgent(desktopChromeUa);
+  // Handle Passkey & WebAuthn discoverable credential selection (Windows Hello / Security Keys)
+  // Resolves passkey login failures and Google "This browser or app may not be secure" on WebAuthn
+  session.defaultSession.on('select-webauthn-account', (event, details, callback) => {
+    const cb = callback || (details && details.callback);
+    try {
+      if (details && details.accounts && details.accounts.length > 0) {
+        cb(details.accounts[0].credentialId);
+      } else if (typeof cb === 'function') {
+        cb();
+      }
+    } catch (err) {
+      console.warn('[WebAuthn] Account selection notice:', err.message);
+      if (typeof cb === 'function') {
+        try { cb(); } catch (_) {}
+      }
+    }
+  });
 
-    // Sanitize request headers so Cloudflare and modern sites receive authentic Google Chrome Client Hints
+  try {
+    // Sanitize request headers:
+    // - For Google sign-in and Google services: use standard desktop Firefox headers and strip
+    //   proprietary Chromium client hints so Google skips embedded-Chromium Botguard attestation
+    // - For all other sites: clean Electron markers and deliver authentic Google Chrome Client Hints
     session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
       const requestHeaders = details.requestHeaders || {};
-      for (const key of Object.keys(requestHeaders)) {
-        const lowerKey = key.toLowerCase();
-        if (lowerKey === 'sec-ch-ua') {
-          requestHeaders[key] = standardSecChUa;
-        } else if (lowerKey === 'sec-ch-ua-platform') {
-          requestHeaders[key] = '"Windows"';
-        } else if (lowerKey === 'sec-ch-ua-mobile') {
-          requestHeaders[key] = '?0';
-        } else if (lowerKey === 'user-agent') {
-          requestHeaders[key] = desktopChromeUa;
+      const url = details.url || '';
+
+      if (isGoogleAuthUrl(url)) {
+        requestHeaders['User-Agent'] = googleAuthUa;
+        delete requestHeaders['Sec-Ch-Ua'];
+        delete requestHeaders['Sec-Ch-Ua-Mobile'];
+        delete requestHeaders['Sec-Ch-Ua-Platform'];
+        delete requestHeaders['Sec-Ch-Ua-Platform-Version'];
+        delete requestHeaders['Sec-Ch-Ua-Full-Version-List'];
+        delete requestHeaders['Sec-Ch-Ua-Model'];
+        delete requestHeaders['sec-ch-ua'];
+        delete requestHeaders['sec-ch-ua-mobile'];
+        delete requestHeaders['sec-ch-ua-platform'];
+        delete requestHeaders['sec-ch-ua-platform-version'];
+        delete requestHeaders['sec-ch-ua-full-version-list'];
+        delete requestHeaders['sec-ch-ua-model'];
+      } else {
+        if (requestHeaders['User-Agent']) {
+          requestHeaders['User-Agent'] = requestHeaders['User-Agent'].replace(/\s*Electron\/\S+/g, '');
+        }
+        if (requestHeaders['user-agent']) {
+          requestHeaders['user-agent'] = requestHeaders['user-agent'].replace(/\s*Electron\/\S+/g, '');
+        }
+        for (const key of Object.keys(requestHeaders)) {
+          const lowerKey = key.toLowerCase();
+          if (lowerKey === 'sec-ch-ua') {
+            requestHeaders[key] = standardSecChUa;
+          } else if (lowerKey === 'sec-ch-ua-platform') {
+            requestHeaders[key] = '"Windows"';
+          } else if (lowerKey === 'sec-ch-ua-mobile') {
+            requestHeaders[key] = '?0';
+          }
         }
       }
       callback({ requestHeaders });
