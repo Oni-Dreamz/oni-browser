@@ -99,7 +99,7 @@
       <div class="os-update-header">
         <div class="os-update-titles">
           <div class="os-settings-group-label" style="margin-bottom: 2px; color: var(--accent-green);">SYSTEM UPDATES</div>
-          <div class="os-update-version-subtitle" id="page-update-version">Current Version: v1.0.0</div>
+          <div class="os-update-version-subtitle" id="page-update-version">Current Version: v1.0.3</div>
         </div>
         <button type="button" class="os-update-btn" id="page-update-action-btn">
           [ Check for Updates ]
@@ -190,7 +190,7 @@
     </div>
 
     <div class="setting-group" style="margin-top: 30px; padding: 20px; background: rgba(0,255,136,0.06); border: 1px solid rgba(0,255,136,0.2); border-radius: 12px;">
-      <div style="font-weight: 700; color: #fff; margin-bottom: 4px;">Oni Browser v1.0.0 (Windows Standalone x64)</div>
+      <div id="settings-about-version" style="font-weight: 700; color: #fff; margin-bottom: 4px;">Oni Browser v1.0.3 (Windows Standalone x64)</div>
       <div style="font-size: 12px; color: var(--text-muted);">Engine: Chromium & Electron 44 • Standalone Portable Edition</div>
     </div>
   </div>
@@ -376,7 +376,7 @@
         });
       // System Updates logic
       const updater = (window.electronAPI && window.electronAPI.updater) || (window.oniAPI && window.oniAPI.updater);
-      let pageAppVersion = '1.0.0';
+      let pageAppVersion = '1.0.3';
       let pageUpdateState = {
         status: 'idle',
         percent: 0,
@@ -575,6 +575,8 @@
           if (v) {
             pageAppVersion = v;
             updatePageUpdateUI();
+            const abtEl = document.getElementById('settings-about-version');
+            if (abtEl) abtEl.textContent = `Oni Browser v${v} (Windows Standalone x64)`;
           }
         }).catch(() => {});
       }

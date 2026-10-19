@@ -46,15 +46,39 @@ class OniShield {
         return;
       }
 
-      // Never block Cloudflare Turnstile, Google authentication, or security challenge requests
-      if (details.url && (
-        details.url.includes('/cdn-cgi/') ||
-        details.url.includes('challenges.cloudflare.com') ||
-        details.url.includes('turnstile') ||
-        details.url.includes('accounts.google.com') ||
-        details.url.includes('/recaptcha/') ||
-        details.url.includes('gstatic.com/recaptcha')
-      )) {
+      const reqUrl = (details.url || '').toLowerCase();
+      const reqInit = (details.initiator || '').toLowerCase();
+      const reqRef = (details.referrer || '').toLowerCase();
+
+      // Ensure all requests where url, initiator, or referrer contains google., gstatic., googleapis., or youtube.
+      // are completely bypassed by the adblocker so auth and Google services never fail with net::ERR_BLOCKED_BY_CLIENT.
+      const isGoogleEcosystem = (str) =>
+        str && (
+          str.includes('google.') ||
+          str.includes('gstatic.') ||
+          str.includes('googleapis.') ||
+          str.includes('youtube.')
+        );
+
+      if (isGoogleEcosystem(reqUrl) || isGoogleEcosystem(reqInit) || isGoogleEcosystem(reqRef)) {
+        callback({ cancel: false });
+        return;
+      }
+
+      // Never block Cloudflare Turnstile, Twitch/Reddit OAuth, or security challenge endpoints
+      if (
+        reqUrl.includes('/cdn-cgi/') ||
+        reqUrl.includes('challenges.cloudflare.com') ||
+        reqUrl.includes('turnstile') ||
+        reqUrl.includes('passport.twitch.tv') ||
+        reqUrl.includes('id.twitch.tv') ||
+        reqUrl.includes('reddit.com/account') ||
+        reqUrl.includes('oauth') ||
+        reqUrl.includes('openid') ||
+        reqUrl.includes('/recaptcha/') ||
+        reqInit.includes('twitch.tv') ||
+        reqInit.includes('reddit.com')
+      ) {
         callback({ cancel: false });
         return;
       }

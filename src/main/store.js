@@ -162,7 +162,7 @@ const CLASSIC_THEME = {
       visible: true,
       showShieldStatus: true,
       quote: '知識は力である • Knowledge is Power',
-      versionBadge: 'v1.0.0 Standalone'
+      versionBadge: 'v' + (app ? app.getVersion() : '1.0.3')
     },
     customCss: ''
   },
@@ -688,7 +688,13 @@ class Store {
 
   // Settings
   getSettings() {
-    return this.data.settings;
+    const s = this.data.settings || {};
+    const currentVer = app ? app.getVersion() : '1.0.3';
+    return {
+      ...s,
+      version: currentVer,
+      versionBadge: `v${currentVer}`
+    };
   }
 
   updateSettings(newSettings) {

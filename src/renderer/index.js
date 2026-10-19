@@ -890,7 +890,7 @@
   overlayBackdrop.addEventListener('click', closeOverlay);
 
   // System Updates State & Notification Indicator
-  let appVersion = '1.0.0';
+  let appVersion = '1.0.3';
   let updateState = {
     status: 'idle',
     percent: 0,
@@ -1320,7 +1320,7 @@
 
       <div class="setting-group" style="padding-top: 10px; border-top: 1px solid var(--border-subtle);">
         <div class="setting-label">About Oni Browser</div>
-        <div class="setting-desc">Version 1.0.0 (Windows Standalone x64 Edition). Crafted for speed, aesthetics, and privacy.</div>
+        <div class="setting-desc">Version ${appVersion} (Windows Standalone x64 Edition). Crafted for speed, aesthetics, and privacy.</div>
       </div>
     `;
 

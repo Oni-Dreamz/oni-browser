@@ -329,7 +329,13 @@
       const versionEl = document.querySelector('.version-badge');
       if (footerEl) footerEl.style.display = nt.footer.visible === false ? 'none' : '';
       if (quoteEl && nt.footer.quote !== undefined) quoteEl.textContent = nt.footer.quote;
-      if (versionEl && nt.footer.versionBadge !== undefined) versionEl.textContent = nt.footer.versionBadge;
+      if (versionEl) {
+        let badgeText = (nt.footer && nt.footer.versionBadge) ? nt.footer.versionBadge : null;
+        if (!badgeText || badgeText.includes('v1.0.0') || badgeText === 'Oni OS v1.0') {
+          badgeText = `v${appVersion}`;
+        }
+        versionEl.textContent = badgeText;
+      }
     }
 
     // 8. Custom CSS
@@ -1367,7 +1373,7 @@
   let activeSettingsSection = 'general';
 
   // System Updates State & General Nav Indicator
-  let appVersion = '1.0.0';
+  let appVersion = '1.0.3';
   let updateState = {
     status: 'idle', // 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'error'
     percent: 0,
@@ -2707,16 +2713,31 @@
               if (osWidgetEngineBtn) osWidgetEngineBtn.textContent = ENGINES[currentEngineIndex].name;
             }
           }
+          if (settings.version) {
+            appVersion = settings.version;
+            const badgeEl = document.querySelector('.version-badge');
+            if (badgeEl) badgeEl.textContent = `v${appVersion}`;
+          }
           const m = getDesktopGridMetrics();
           renderDesktopWidgets(m, true);
           renderDesktopApps(m);
         };
 
-        const [activeTheme, shieldStats, initialSettings] = await Promise.all([
+        const [activeTheme, shieldStats, initialSettings, fetchedVersion] = await Promise.all([
           window.oniAPI.getActiveTheme ? window.oniAPI.getActiveTheme() : null,
           window.oniAPI.getShieldStats ? window.oniAPI.getShieldStats() : null,
-          window.oniAPI.getSettings ? window.oniAPI.getSettings() : null
+          window.oniAPI.getSettings ? window.oniAPI.getSettings() : null,
+          (window.oniAPI && window.oniAPI.updater && window.oniAPI.updater.getVersion) ? window.oniAPI.updater.getVersion().catch(() => null) : null
         ]);
+        if (fetchedVersion) {
+          appVersion = fetchedVersion;
+        } else if (initialSettings && initialSettings.version) {
+          appVersion = initialSettings.version;
+        }
+        const initialBadgeEl = document.querySelector('.version-badge');
+        if (initialBadgeEl) {
+          initialBadgeEl.textContent = `v${appVersion}`;
+        }
         if (initialSettings) {
           applySettingsState(initialSettings);
         }

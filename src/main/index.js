@@ -5,40 +5,209 @@ const fs = require('fs');
 const store = require('./store');
 const oniShield = require('./adblock');
 
-// Disable Blink automation features so navigator.webdriver is not flagged by Turnstile/Cloudflare
+// Disable Blink automation features so navigator.webdriver is not flagged by Turnstile/Cloudflare/anti-bot systems
 app.commandLine.appendSwitch('disable-blink-features', 'AutomationControlled');
 // Enable media & hardware video acceleration features for DRM and 4K/1080p playback
 app.commandLine.appendSwitch('enable-features', 'PlatformHEVCDecoderSupport');
 
-// Standard authentic Google Chrome User-Agent and Client Hints
-const chromeVer = process.versions.chrome || '132.0.0.0';
-const desktopChromeUa = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVer} Safari/537.36`;
-const chromeMajor = chromeVer.split('.')[0];
-const standardSecChUa = `"Not)A:Brand";v="99", "Google Chrome";v="${chromeMajor}", "Chromium";v="${chromeMajor}"`;
-const googleAuthUa = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:134.0) Gecko/20100101 Firefox/134.0';
+// Standard authentic Google Chrome User-Agent and Client Hints (matching desktop Chrome 131)
+const STABLE_CHROME_VERSION = '131.0.0.0';
+const chromeMajor = '131';
+const cleanUA = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${STABLE_CHROME_VERSION} Safari/537.36`;
+const desktopChromeUa = cleanUA;
+const standardSecChUa = `"Chromium";v="${chromeMajor}", "Not_A Brand";v="24", "Google Chrome";v="${chromeMajor}"`;
 
-function isGoogleAuthUrl(url) {
-  if (!url || typeof url !== 'string') return false;
+// Set authentic Google Chrome User-Agent globally for all renderers, workers, iframes and network requests
+app.userAgentFallback = cleanUA;
+
+// Reusable helper function to configure clean User-Agent and authentic Client Hints across sessions
+function configureSessionHeaders(targetSession) {
+  if (!targetSession) return;
   try {
-    const host = new URL(url).hostname.toLowerCase();
-    return (
-      host === 'google.com' ||
-      host.endsWith('.google.com') ||
-      host === 'gstatic.com' ||
-      host.endsWith('.gstatic.com') ||
-      host === 'googleusercontent.com' ||
-      host.endsWith('.googleusercontent.com') ||
-      host === 'youtube.com' ||
-      host.endsWith('.youtube.com')
-    );
+    targetSession.setUserAgent(cleanUA);
+  } catch (e) {}
+
+  try {
+    targetSession.webRequest.onBeforeSendHeaders((details, callback) => {
+      const requestHeaders = details.requestHeaders || {};
+
+      // Ensure clean User-Agent without Electron or application branding
+      requestHeaders['User-Agent'] = cleanUA;
+      if (requestHeaders['user-agent']) {
+        requestHeaders['user-agent'] = cleanUA;
+      }
+
+      // Ensure exact authentic Google Chrome Client Hints
+      requestHeaders['Sec-CH-UA'] = standardSecChUa;
+      requestHeaders['Sec-CH-UA-Mobile'] = '?0';
+      requestHeaders['Sec-CH-UA-Platform'] = '"Windows"';
+
+      // Purge any headers leaking Electron, custom branding, or lowercase variants
+      for (const key of Object.keys(requestHeaders)) {
+        const lower = key.toLowerCase();
+        if (
+          lower.includes('electron') ||
+          lower.includes('oni-browser') ||
+          lower === 'sec-ch-ua' ||
+          lower === 'sec-ch-ua-mobile' ||
+          lower === 'sec-ch-ua-platform'
+        ) {
+          delete requestHeaders[key];
+        }
+      }
+
+      // Re-apply capitalized canonical headers
+      requestHeaders['Sec-CH-UA'] = standardSecChUa;
+      requestHeaders['Sec-CH-UA-Mobile'] = '?0';
+      requestHeaders['Sec-CH-UA-Platform'] = '"Windows"';
+
+      callback({ requestHeaders });
+    });
   } catch (e) {
-    return (
-      url.includes('google.com') ||
-      url.includes('gstatic.com') ||
-      url.includes('googleusercontent.com') ||
-      url.includes('youtube.com')
-    );
+    console.warn('[Session] Failed to attach onBeforeSendHeaders:', e.message);
   }
+}
+
+// Helper to parse dimensions and coordinates from window.open features string
+function parseWindowFeatures(features) {
+  const result = { width: 520, height: 700 };
+  if (!features || typeof features !== 'string') return result;
+
+  const parts = features.split(',');
+  for (const part of parts) {
+    const [rawKey, rawVal] = part.split('=').map(s => s && s.trim());
+    if (rawKey && rawVal) {
+      const key = rawKey.toLowerCase();
+      const num = parseInt(rawVal, 10);
+      if (!isNaN(num) && num > 0) {
+        if (key === 'width' || key === 'innerwidth') result.width = Math.max(380, Math.min(1600, num));
+        if (key === 'height' || key === 'innerheight') result.height = Math.max(420, Math.min(1200, num));
+        if (key === 'left' || key === 'screenx') result.x = Math.max(0, num);
+        if (key === 'top' || key === 'screeny') result.y = Math.max(0, num);
+      }
+    }
+  }
+  return result;
+}
+
+// Determines whether a window.open request represents an OAuth popup, login dialog, or sized popup window
+function isPopupOrAuthRequest(details) {
+  if (!details) return false;
+  const { url = '', frameName = '', features = '', disposition = '' } = details;
+
+  // 1. Explicit window disposition
+  if (disposition === 'new-window') {
+    return true;
+  }
+
+  // 2. Features specifying dimensions or popup properties
+  if (features && typeof features === 'string' && features.trim().length > 0) {
+    const f = features.toLowerCase();
+    if (
+      f.includes('width=') ||
+      f.includes('height=') ||
+      f.includes('left=') ||
+      f.includes('top=') ||
+      f.includes('popup') ||
+      f.includes('menubar=0') || f.includes('menubar=no') ||
+      f.includes('toolbar=0') || f.includes('toolbar=no') ||
+      f.includes('location=0') || f.includes('location=no') ||
+      f.includes('status=0') || f.includes('status=no') ||
+      f.includes('resizable=0') || f.includes('resizable=no')
+    ) {
+      return true;
+    }
+  }
+
+  // 3. Known OAuth / Authentication / Identity providers and sign-in endpoints
+  if (url && typeof url === 'string') {
+    try {
+      const parsed = new URL(url);
+      const host = parsed.hostname.toLowerCase();
+      const path = parsed.pathname.toLowerCase();
+      const search = parsed.search.toLowerCase();
+
+      if (
+        host === 'accounts.google.com' ||
+        host.endsWith('.accounts.google.com') ||
+        host === 'appleid.apple.com' ||
+        host === 'passport.twitch.tv' ||
+        host === 'id.twitch.tv' ||
+        host === 'login.live.com' ||
+        host === 'login.microsoftonline.com' ||
+        host === 'auth.reddit.com' ||
+        (host.includes('reddit.com') && (path.includes('/login') || path.includes('/register') || path.includes('/account/'))) ||
+        (host.includes('twitch.tv') && path.includes('/login')) ||
+        (host.includes('discord.com') && (path.includes('/oauth2') || path.includes('/login'))) ||
+        (host.includes('github.com') && path.includes('/login/oauth')) ||
+        (host.includes('twitter.com') && path.includes('/oauth')) ||
+        (host.includes('x.com') && path.includes('/oauth')) ||
+        (host.includes('facebook.com') && (path.includes('/dialog/oauth') || path.includes('/login')))
+      ) {
+        return true;
+      }
+
+      // Query parameter OAuth signatures
+      if (
+        search.includes('client_id=') ||
+        search.includes('response_type=') ||
+        search.includes('redirect_uri=') ||
+        search.includes('oauth') ||
+        search.includes('openid')
+      ) {
+        return true;
+      }
+    } catch (_) {}
+  }
+
+  // 4. FrameName indicating an authentication or popup flow
+  if (frameName && typeof frameName === 'string') {
+    const fn = frameName.toLowerCase();
+    if (
+      fn.includes('popup') ||
+      fn.includes('oauth') ||
+      fn.includes('auth') ||
+      fn.includes('login') ||
+      fn.includes('signin') ||
+      fn.includes('google_') ||
+      fn.includes('sso')
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+// Generate options for creating native popup windows with window.opener intact
+function getPopupWindowOptions(details, parentWc) {
+  const parsed = parseWindowFeatures(details.features);
+  const options = {
+    parent: (mainWindow && !mainWindow.isDestroyed()) ? mainWindow : null,
+    modal: false,
+    autoHideMenuBar: true,
+    show: true,
+    width: parsed.width || 520,
+    height: parsed.height || 700,
+    minWidth: 380,
+    minHeight: 420,
+    backgroundColor: '#0c0d12',
+    webPreferences: {
+      preload: path.join(__dirname, '../preload/index.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      spellcheck: true
+    }
+  };
+  if (parentWc && parentWc.session) {
+    options.webPreferences.session = parentWc.session;
+  }
+  if (parsed.x !== undefined && parsed.y !== undefined) {
+    options.x = parsed.x;
+    options.y = parsed.y;
+  }
+  return options;
 }
 
 // Helper to extract incoming URL or file path from command line arguments
@@ -894,7 +1063,7 @@ function createTab(initialUrl = 'oni://newtab', options = {}) {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
       spellcheck: true,
       plugins: true,
       webgl: true,
@@ -992,19 +1161,76 @@ function createTab(initialUrl = 'oni://newtab', options = {}) {
     }
   });
 
+  wc.on('close', () => {
+    closeTab(tab.id);
+  });
+
   // Handle target="_blank" and window.open
   wc.setWindowOpenHandler((details) => {
     const { url, postBody } = details;
-    if (/\.(exe|msi|zip|7z|dmg|pkg|tar|gz|rar)$/i.test(url.split('?')[0])) {
+    if (url && /\.(exe|msi|zip|7z|dmg|pkg|tar|gz|rar)$/i.test(url.split('?')[0])) {
       wc.downloadURL(url);
       return { action: 'deny' };
     }
+
+    // Allow OAuth, login popups, and sized dialog windows with window.opener intact
+    if (isPopupOrAuthRequest(details)) {
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: getPopupWindowOptions(details, wc)
+      };
+    }
+
     if (postBody && postBody.data) {
       createTab(url, { postData: postBody });
       return { action: 'deny' };
     }
     createTab(url);
     return { action: 'deny' };
+  });
+
+  // Configure child popup windows created via window.open (OAuth, sign-in dialogs, etc.)
+  wc.on('did-create-window', (childWindow, details) => {
+    try {
+      if (childWindow && !childWindow.isDestroyed()) {
+        if (childWindow.removeMenu) {
+          childWindow.removeMenu();
+        } else if (childWindow.setMenu) {
+          childWindow.setMenu(null);
+        }
+        try {
+          childWindow.setIcon(path.join(__dirname, '../../assets/icon.png'));
+        } catch (_) {}
+
+        const childWc = childWindow.webContents;
+        if (childWc && !childWc.isDestroyed()) {
+          try {
+            childWc.setUserAgent(desktopChromeUa);
+          } catch (_) {}
+
+          setupShortcutsForWebContents(childWc);
+
+          // Handle window.open inside the popup itself
+          childWc.setWindowOpenHandler((innerDetails) => {
+            const innerUrl = innerDetails.url || '';
+            if (innerUrl && /\.(exe|msi|zip|7z|dmg|pkg|tar|gz|rar)$/i.test(innerUrl.split('?')[0])) {
+              childWc.downloadURL(innerUrl);
+              return { action: 'deny' };
+            }
+            if (isPopupOrAuthRequest(innerDetails)) {
+              return {
+                action: 'allow',
+                overrideBrowserWindowOptions: getPopupWindowOptions(innerDetails, childWc)
+              };
+            }
+            createTab(innerUrl);
+            return { action: 'deny' };
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('[Popup] Error configuring child popup window:', e.message);
+    }
   });
 
   // Context Menu
@@ -1630,65 +1856,58 @@ app.whenReady().then(async () => {
   // Handle Passkey & WebAuthn discoverable credential selection (Windows Hello / Security Keys)
   // Resolves passkey login failures and Google "This browser or app may not be secure" on WebAuthn
   session.defaultSession.on('select-webauthn-account', (event, details, callback) => {
-    const cb = callback || (details && details.callback);
+    let responded = false;
+    const respond = (credId) => {
+      if (responded) return;
+      responded = true;
+      const cb = typeof callback === 'function' ? callback : (details && details.callback);
+      if (typeof cb === 'function') {
+        try {
+          cb(credId || null);
+        } catch (e) {
+          console.warn('[WebAuthn] Account selection callback error:', e.message);
+        }
+      }
+    };
+
     try {
-      if (details && details.accounts && details.accounts.length > 0) {
-        cb(details.accounts[0].credentialId);
-      } else if (typeof cb === 'function') {
-        cb();
+      if (event && typeof event.preventDefault === 'function') {
+        event.preventDefault();
+      }
+
+      const accounts = details && Array.isArray(details.accounts) ? details.accounts : [];
+      if (accounts.length > 0) {
+        // Automatically select the primary credential ID for the discoverable passkey
+        respond(accounts[0].credentialId);
+      } else {
+        respond(null);
       }
     } catch (err) {
       console.warn('[WebAuthn] Account selection notice:', err.message);
-      if (typeof cb === 'function') {
-        try { cb(); } catch (_) {}
-      }
+      respond(null);
     }
   });
 
-  try {
-    // Sanitize request headers:
-    // - For Google sign-in and Google services: use standard desktop Firefox headers and strip
-    //   proprietary Chromium client hints so Google skips embedded-Chromium Botguard attestation
-    // - For all other sites: clean Electron markers and deliver authentic Google Chrome Client Hints
-    session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
-      const requestHeaders = details.requestHeaders || {};
-      const url = details.url || '';
+  // Configure clean User-Agent and authentic Client Hints across defaultSession and any custom partition sessions
+  configureSessionHeaders(session.defaultSession);
+  app.on('session-created', (sess) => {
+    configureSessionHeaders(sess);
+  });
 
-      if (isGoogleAuthUrl(url)) {
-        requestHeaders['User-Agent'] = googleAuthUa;
-        delete requestHeaders['Sec-Ch-Ua'];
-        delete requestHeaders['Sec-Ch-Ua-Mobile'];
-        delete requestHeaders['Sec-Ch-Ua-Platform'];
-        delete requestHeaders['Sec-Ch-Ua-Platform-Version'];
-        delete requestHeaders['Sec-Ch-Ua-Full-Version-List'];
-        delete requestHeaders['Sec-Ch-Ua-Model'];
-        delete requestHeaders['sec-ch-ua'];
-        delete requestHeaders['sec-ch-ua-mobile'];
-        delete requestHeaders['sec-ch-ua-platform'];
-        delete requestHeaders['sec-ch-ua-platform-version'];
-        delete requestHeaders['sec-ch-ua-full-version-list'];
-        delete requestHeaders['sec-ch-ua-model'];
-      } else {
-        if (requestHeaders['User-Agent']) {
-          requestHeaders['User-Agent'] = requestHeaders['User-Agent'].replace(/\s*Electron\/\S+/g, '');
-        }
-        if (requestHeaders['user-agent']) {
-          requestHeaders['user-agent'] = requestHeaders['user-agent'].replace(/\s*Electron\/\S+/g, '');
-        }
-        for (const key of Object.keys(requestHeaders)) {
-          const lowerKey = key.toLowerCase();
-          if (lowerKey === 'sec-ch-ua') {
-            requestHeaders[key] = standardSecChUa;
-          } else if (lowerKey === 'sec-ch-ua-platform') {
-            requestHeaders[key] = '"Windows"';
-          } else if (lowerKey === 'sec-ch-ua-mobile') {
-            requestHeaders[key] = '?0';
-          }
-        }
-      }
-      callback({ requestHeaders });
+  // Wipe tainted Google cookies & storage data on startup (e.g. persistent __Host-GAPS cookie from prior blocked logins)
+  try {
+    await session.defaultSession.clearStorageData({
+      origin: 'https://accounts.google.com',
+      storages: ['cookies', 'localstorage', 'indexdb', 'websql', 'serviceworkers', 'cachestorage']
     });
-  } catch (e) {}
+    await session.defaultSession.clearStorageData({
+      origin: 'https://www.google.com',
+      storages: ['cookies', 'localstorage', 'indexdb', 'websql', 'serviceworkers', 'cachestorage']
+    });
+    console.log('[Auth] Cleared potentially tainted Google session & cookie state on startup.');
+  } catch (err) {
+    console.warn('[Auth] Error clearing Google storage data on startup:', err.message);
+  }
 
   createWindow();
 

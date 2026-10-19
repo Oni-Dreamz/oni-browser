@@ -555,7 +555,7 @@
   let activeSettingsSection = 'general';
 
   // System Updates State & General Nav Indicator
-  let appVersion = '1.0.0';
+  let appVersion = '1.0.3';
   let updateState = {
     status: 'idle', // 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'error'
     percent: 0,
