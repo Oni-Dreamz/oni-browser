@@ -30,12 +30,13 @@ app.commandLine.appendSwitch(
 // Enable media & hardware video acceleration features for DRM and 4K/1080p playback
 app.commandLine.appendSwitch('enable-features', 'PlatformHEVCDecoderSupport');
 
-// Standard authentic Google Chrome User-Agent and Client Hints (matching desktop Chrome 131)
-const STABLE_CHROME_VERSION = '132.0.6834.160';
-const chromeMajor = '132';
-const cleanUA = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${STABLE_CHROME_VERSION} Safari/537.36`;
+// Standard authentic Google Chrome User-Agent and Client Hints matching the Chromium engine
+const engineChromeVer = (process && process.versions && process.versions.chrome) || '152.0.7977.130';
+const chromeMajor = engineChromeVer.split('.')[0] || '152';
+const cleanUA = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${engineChromeVer} Safari/537.36`;
 const desktopChromeUa = cleanUA;
 const standardSecChUa = `"Not A(Brand";v="8", "Chromium";v="${chromeMajor}", "Google Chrome";v="${chromeMajor}"`;
+const standardSecChUaFullVersionList = `"Not A(Brand";v="8.0.0.0", "Chromium";v="${engineChromeVer}", "Google Chrome";v="${engineChromeVer}"`;
 
 // Set authentic Google Chrome User-Agent globally for all renderers, workers, iframes and network requests
 app.userAgentFallback = cleanUA;
@@ -55,32 +56,71 @@ function configureSessionHeaders(targetSession) {
         return;
       }
 
-      const requestHeaders = details.requestHeaders || {};
-      let modified = false;
+      const reqUrl = (details.url || '').toLowerCase();
+      const isGoogleDomain =
+        reqUrl.includes('google.com') ||
+        reqUrl.includes('googleusercontent.com') ||
+        reqUrl.includes('gstatic.com');
 
-      // Ensure clean User-Agent without Electron or application branding
-      if (requestHeaders['User-Agent'] && /Electron|OniBrowser/i.test(requestHeaders['User-Agent'])) {
-        requestHeaders['User-Agent'] = requestHeaders['User-Agent'].replace(/\s*Electron\/\S+/g, '').replace(/\s*OniBrowser\/\S+/g, '');
-        modified = true;
-      }
-      if (requestHeaders['user-agent'] && /Electron|OniBrowser/i.test(requestHeaders['user-agent'])) {
-        requestHeaders['user-agent'] = requestHeaders['user-agent'].replace(/\s*Electron\/\S+/g, '').replace(/\s*OniBrowser\/\S+/g, '');
-        modified = true;
-      }
+      if (!isGoogleDomain) {
+        // For general web traffic (Netflix, Twitch, Disney+, Crunchyroll, X.com, etc.):
+        // Pass 100% native headers, cookies (NetflixId, SecureNetflixId), and origin untouched.
+        const requestHeaders = details.requestHeaders || {};
+        let modified = false;
 
-      // Purge any headers accidentally leaking internal Oni branding
-      for (const key of Object.keys(requestHeaders)) {
-        if (key.toLowerCase().includes('oni-browser')) {
-          delete requestHeaders[key];
+        if (requestHeaders['User-Agent'] && /Electron|OniBrowser/i.test(requestHeaders['User-Agent'])) {
+          requestHeaders['User-Agent'] = requestHeaders['User-Agent'].replace(/\s*Electron\/\S+/g, '').replace(/\s*OniBrowser\/\S+/g, '');
           modified = true;
+        }
+        if (requestHeaders['user-agent'] && /Electron|OniBrowser/i.test(requestHeaders['user-agent'])) {
+          requestHeaders['user-agent'] = requestHeaders['user-agent'].replace(/\s*Electron\/\S+/g, '').replace(/\s*OniBrowser\/\S+/g, '');
+          modified = true;
+        }
+
+        // Purge any headers accidentally leaking internal Oni branding
+        for (const key of Object.keys(requestHeaders)) {
+          if (key.toLowerCase().includes('oni-browser')) {
+            delete requestHeaders[key];
+            modified = true;
+          }
+        }
+
+        if (modified) {
+          callback({ requestHeaders });
+        } else {
+          callback({});
+        }
+        return;
+      }
+
+      // Google authentication / BotGuard domains:
+      // Synchronize canonical Chrome UA & Client Hints
+      const requestHeaders = details.requestHeaders || {};
+
+      for (const key of Object.keys(requestHeaders)) {
+        const lower = key.toLowerCase();
+        if (
+          lower.includes('electron') ||
+          lower.includes('oni-browser') ||
+          lower === 'user-agent' ||
+          lower === 'sec-ch-ua' ||
+          lower === 'sec-ch-ua-mobile' ||
+          lower === 'sec-ch-ua-platform' ||
+          lower === 'sec-ch-ua-full-version' ||
+          lower === 'sec-ch-ua-full-version-list'
+        ) {
+          delete requestHeaders[key];
         }
       }
 
-      if (modified) {
-        callback({ requestHeaders });
-      } else {
-        callback({});
-      }
+      requestHeaders['User-Agent'] = cleanUA;
+      requestHeaders['Sec-CH-UA'] = standardSecChUa;
+      requestHeaders['Sec-CH-UA-Mobile'] = '?0';
+      requestHeaders['Sec-CH-UA-Platform'] = '"Windows"';
+      requestHeaders['Sec-CH-UA-Full-Version'] = `"${engineChromeVer}"`;
+      requestHeaders['Sec-CH-UA-Full-Version-List'] = standardSecChUaFullVersionList;
+
+      callback({ requestHeaders });
     });
   } catch (e) {
     console.warn('[Session] Failed to attach onBeforeSendHeaders:', e.message);
@@ -215,7 +255,7 @@ function getPopupWindowOptions(details, parentWc) {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true,
+      sandbox: false,
       spellcheck: true
     }
   };

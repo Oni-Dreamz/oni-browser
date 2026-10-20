@@ -219,7 +219,7 @@ if (window.location.protocol === 'file:') {
     }
   });
 } else {
-  // Web page execution (e.g. SteamDB, Turnstile, Cloudflare challenges, DRM)
+  // Web page execution (e.g. SteamDB, Turnstile, Cloudflare challenges, DRM, Twitch, X.com, Google)
   try {
     const host = (window.location && window.location.hostname) ? window.location.hostname.toLowerCase() : '';
     const isGoogleAuthOrService =
@@ -235,52 +235,208 @@ if (window.location.protocol === 'file:') {
       host === 'youtube.com' ||
       host.endsWith('.youtube.com');
 
-    // Never inject synthetic Chrome overrides on Google authentication/service domains
-    if (!isGoogleAuthOrService) {
-      const stealthCode = `
-        // Standard Google Chrome window.chrome object
-        try {
+    const runInMainWorld = (code) => {
+      try {
+        if (webFrame && webFrame.executeJavaScriptInIsolatedWorld) {
+          webFrame.executeJavaScriptInIsolatedWorld(0, [{ code }]);
+        } else if (webFrame && webFrame.executeJavaScript) {
+          webFrame.executeJavaScript(code);
+        }
+      } catch (_) {}
+    };
+
+    if (isGoogleAuthOrService) {
+      // Synchronize MAIN world environment ONLY on Google authentication/service domains for BotGuard
+      const chromeVer = (process && process.versions && process.versions.chrome) || '152.0.7977.130';
+      const majorVersion = chromeVer ? chromeVer.split('.')[0] : '152';
+      const chromeUA = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVer} Safari/537.36`;
+
+      const googleBotGuardCode = `
+        (function() {
+          const majorVersion = '${majorVersion}';
+          const fullVersion = '${chromeVer}';
+          const chromeUA = '${chromeUA}';
+
+          // 1. Synchronize navigator.userAgent and appVersion on Google domains
+          try {
+            Object.defineProperty(navigator, 'userAgent', {
+              get: () => chromeUA,
+              configurable: true,
+              enumerable: true
+            });
+            Object.defineProperty(navigator, 'appVersion', {
+              get: () => '5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/' + fullVersion + ' Safari/537.36',
+              configurable: true,
+              enumerable: true
+            });
+          } catch (_) {}
+
+          // 2. Populate realistic desktop Chrome properties on window.chrome on Google
           if (!window.chrome) {
             window.chrome = {};
           }
-          if (!window.chrome.app) {
-            window.chrome.app = {
+          if (Object.keys(window.chrome).length === 0 || !window.chrome.app) {
+            const appObj = {
               isInstalled: false,
               InstallState: { DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' },
               RunningState: { CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running' },
-              getDetails: function () {},
-              getIsInstalled: function () {},
-              installState: function () {},
-              runningState: function () {}
+              getDetails: function() {},
+              getIsInstalled: function() { return false; },
+              installState: function() { return 'not_installed'; },
+              runningState: function() { return 'cannot_run'; }
             };
-          }
-        } catch (e) {}
+            const runtimeObj = {
+              OnInstalledReason: { CHROME_UPDATE: 'chrome_update', INSTALL: 'install', SHARED_MODULE_UPDATE: 'shared_module_update', UPDATE: 'update' },
+              OnRestartRequiredReason: { APP_UPDATE: 'app_update', OS_UPDATE: 'os_update', PERIODIC: 'periodic' },
+              PlatformArch: { ARM: 'arm', ARM64: 'arm64', MIPS: 'mips', MIPS64: 'mips64', X86_32: 'x86-32', X86_64: 'x86-64' },
+              PlatformNaclArch: { ARM: 'arm', MIPS: 'mips', MIPS64: 'mips64', X86_32: 'x86-32', X86_64: 'x86-64' },
+              PlatformOs: { ANDROID: 'android', CROS: 'cros', LINUX: 'linux', MAC: 'mac', OPENBSD: 'openbsd', WIN: 'win' },
+              RequestUpdateCheckStatus: { NO_UPDATE: 'no_update', THROTTLED: 'throttled', UPDATE_AVAILABLE: 'update_available' },
+              connect: function(extId, connectInfo) {
+                const msgListeners = [];
+                const discListeners = [];
+                return {
+                  name: (connectInfo && connectInfo.name) || '',
+                  onMessage: {
+                    addListener: function(fn) { if (typeof fn === 'function') msgListeners.push(fn); },
+                    removeListener: function(fn) { const i = msgListeners.indexOf(fn); if (i !== -1) msgListeners.splice(i, 1); },
+                    hasListener: function(fn) { return msgListeners.includes(fn); }
+                  },
+                  onDisconnect: {
+                    addListener: function(fn) { if (typeof fn === 'function') discListeners.push(fn); },
+                    removeListener: function(fn) { const i = discListeners.indexOf(fn); if (i !== -1) discListeners.splice(i, 1); },
+                    hasListener: function(fn) { return discListeners.includes(fn); }
+                  },
+                  postMessage: function() {},
+                  disconnect: function() {
+                    for (const fn of discListeners) { try { fn(); } catch (_) {} }
+                  }
+                };
+              },
+              sendMessage: function(extId, msg, opts, cb) {
+                const callback = typeof cb === 'function' ? cb : (typeof opts === 'function' ? opts : (typeof msg === 'function' ? msg : null));
+                if (callback) {
+                  setTimeout(() => { try { callback(undefined); } catch (_) {} }, 0);
+                }
+                return Promise.resolve(undefined);
+              }
+            };
+            const csiObj = function() {
+              return { onloadT: Date.now(), startE: Date.now(), pageT: 100.0, tran: 15 };
+            };
+            const loadTimesObj = function() {
+              const now = Date.now() / 1000;
+              return {
+                requestTime: now, startLoadTime: now, commitLoadTime: now, finishDocumentLoadTime: now,
+                finishLoadTime: now, firstPaintTime: now, firstPaintAfterLoadTime: 0, navigationType: 'Other',
+                wasFetchedViaSpdy: false, wasNpnNegotiated: false, npnNegotiatedProtocol: 'unknown',
+                wasAlternateProtocolAvailable: false, connectionInfo: 'http/1.1'
+              };
+            };
 
-        // Ensure authentic userAgentData brands including Google Chrome for DRM & streaming compatibility
-        try {
-          if (navigator.userAgentData && Array.isArray(navigator.userAgentData.brands)) {
-            const chromeMajor = (navigator.userAgent.match(/Chrome\\/(\\d+)/) || [null, '132'])[1];
-            const hasChrome = navigator.userAgentData.brands.some(b => b.brand === 'Google Chrome');
-            if (!hasChrome) {
-              const patchedBrands = [
-                { brand: 'Not)A:Brand', version: '99' },
-                { brand: 'Google Chrome', version: chromeMajor },
-                { brand: 'Chromium', version: chromeMajor }
-              ];
-              try {
-                Object.defineProperty(navigator.userAgentData, 'brands', {
-                  get: () => patchedBrands,
-                  configurable: true,
-                  enumerable: true
-                });
-              } catch (e) {}
+            try {
+              Object.defineProperties(window.chrome, {
+                app: { value: appObj, writable: true, enumerable: true, configurable: true },
+                runtime: { value: runtimeObj, writable: true, enumerable: true, configurable: true },
+                csi: { value: csiObj, writable: true, enumerable: true, configurable: true },
+                loadTimes: { value: loadTimesObj, writable: true, enumerable: true, configurable: true }
+              });
+            } catch(e) {
+              window.chrome.app = appObj;
+              window.chrome.runtime = runtimeObj;
+              window.chrome.csi = csiObj;
+              window.chrome.loadTimes = loadTimesObj;
             }
           }
-        } catch (e) {}
+
+          // 3. Align navigator.userAgentData with Chrome brands on Google
+          const chromeBrands = Object.freeze([
+            Object.freeze({ brand: 'Chromium', version: majorVersion }),
+            Object.freeze({ brand: 'Not_A Brand', version: '24' }),
+            Object.freeze({ brand: 'Google Chrome', version: majorVersion })
+          ]);
+          const fullVersionList = Object.freeze([
+            Object.freeze({ brand: 'Chromium', version: fullVersion }),
+            Object.freeze({ brand: 'Not_A Brand', version: '24.0.0.0' }),
+            Object.freeze({ brand: 'Google Chrome', version: fullVersion })
+          ]);
+
+          if (navigator.userAgentData) {
+            try {
+              const proto = Object.getPrototypeOf(navigator.userAgentData);
+              if (proto && Object.getOwnPropertyDescriptor(proto, 'brands')) {
+                Object.defineProperty(proto, 'brands', {
+                  get: function() { return chromeBrands; },
+                  enumerable: true,
+                  configurable: true
+                });
+              } else {
+                Object.defineProperty(navigator.userAgentData, 'brands', {
+                  get: function() { return chromeBrands; },
+                  enumerable: true,
+                  configurable: true
+                });
+              }
+
+              const origGetHighEntropy = (proto && proto.getHighEntropyValues) || navigator.userAgentData.getHighEntropyValues;
+              const customGetHighEntropy = async function(hints = []) {
+                let result = {};
+                if (typeof origGetHighEntropy === 'function') {
+                  try { result = await origGetHighEntropy.call(this, hints); } catch(e) {}
+                }
+                result.brands = chromeBrands;
+                result.mobile = false;
+                result.platform = 'Windows';
+                if (Array.isArray(hints)) {
+                  if (hints.includes('fullVersionList')) result.fullVersionList = fullVersionList;
+                  if (hints.includes('uaFullVersion')) result.uaFullVersion = fullVersion;
+                  if (hints.includes('platformVersion')) result.platformVersion = result.platformVersion || '15.0.0';
+                  if (hints.includes('architecture')) result.architecture = 'x86';
+                  if (hints.includes('bitness')) result.bitness = '64';
+                }
+                return result;
+              };
+
+              if (proto && proto.getHighEntropyValues) {
+                Object.defineProperty(proto, 'getHighEntropyValues', {
+                  value: customGetHighEntropy,
+                  writable: true,
+                  enumerable: true,
+                  configurable: true
+                });
+              } else {
+                navigator.userAgentData.getHighEntropyValues = customGetHighEntropy;
+              }
+            } catch (e) {}
+          }
+        })();
       `;
-      if (webFrame && webFrame.executeJavaScriptInIsolatedWorld) {
-        webFrame.executeJavaScriptInIsolatedWorld(0, [{ code: stealthCode }]);
-      }
+      runInMainWorld(googleBotGuardCode);
+    } else {
+      // Non-Google domains (Netflix, Twitch, X.com, Disney+, Crunchyroll, Reddit, etc.):
+      // ONLY define window.chrome.app if missing (standard desktop Chrome behavior).
+      // NEVER touch navigator.userAgentData, runtime, or prototypes so Kasada (Twitch) & DRM (Netflix) are 100% native!
+      const nonGoogleCode = `
+        (function() {
+          try {
+            if (!window.chrome) {
+              window.chrome = {};
+            }
+            if (!window.chrome.app) {
+              window.chrome.app = {
+                isInstalled: false,
+                InstallState: { DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' },
+                RunningState: { CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running' },
+                getDetails: function () {},
+                getIsInstalled: function () { return false; },
+                installState: function () { return 'not_installed'; },
+                runningState: function () { return 'cannot_run'; }
+              };
+            }
+          } catch (_) {}
+        })();
+      `;
+      runInMainWorld(nonGoogleCode);
     }
   } catch (err) {}
 }

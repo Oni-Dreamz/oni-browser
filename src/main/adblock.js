@@ -46,44 +46,61 @@ class OniShield {
       }
 
       const reqUrl = (details.url || '').toLowerCase();
+      let pageUrl = '';
+      try {
+        if (details.webContents && !details.webContents.isDestroyed() && details.webContents.getURL) {
+          pageUrl = (details.webContents.getURL() || '').toLowerCase();
+        }
+      } catch (_) {}
+      let frameUrl = '';
+      try {
+        if (details.frame && details.frame.url) {
+          frameUrl = (details.frame.url || '').toLowerCase();
+        }
+      } catch (_) {}
+      const reqInitOrigin = (details.initiatorOrigin || '').toLowerCase();
       const reqInit = (details.initiator || '').toLowerCase();
       const reqRef = (details.referrer || '').toLowerCase();
 
-      // Ensure all requests where url, initiator, or referrer contains google., gstatic., googleapis., or youtube.
-      // are completely bypassed by the adblocker so auth and Google services never fail with net::ERR_BLOCKED_BY_CLIENT.
-      const isGoogleEcosystem = (str) =>
+      // Ensure requests belonging to authentication flows, streaming services, or platform integrity
+      // are completely bypassed by the adblocker to prevent breakage on Twitch infinite scroll,
+      // Netflix login/profile/playback, and X.com Google sign-in.
+      const isCriticalOrAuth = (str) =>
         str && (
-          str.includes('google.') ||
-          str.includes('gstatic.') ||
-          str.includes('googleapis.') ||
-          str.includes('youtube.')
-        );
-
-      if (isGoogleEcosystem(reqUrl) || isGoogleEcosystem(reqInit) || isGoogleEcosystem(reqRef)) {
-        callback({ cancel: false });
-        return;
-      }
-
-      // Exempt domains and CDNs from adblocking to avoid breaking authentication, virtualized lists (e.g. Twitch directory streams), or DRM video playback
-      const isExemptDomain = (str) =>
-        str && (
-          str.includes('twitch.tv') ||
+          str.includes('google') ||       // google.com, google-analytics, googleadservices, googlesyndication, accounts.google
+          str.includes('gstatic') ||
+          str.includes('googleapis') ||
+          str.includes('doubleclick') ||   // required for Google Identity Services / GSI on X.com
+          str.includes('youtube') ||
+          str.includes('twitch.tv') ||    // required for Twitch integrity, GQL, and category directory infinite scroll
           str.includes('ttvnw.net') ||
           str.includes('jtvnw.net') ||
-          str.includes('amazon-adsystem.com') ||
+          str.includes('amazon-adsystem.com') || // required for Twitch device and ad telemetry handshake
           str.includes('media-amazon.com') ||
-          str.includes('reddit.com') ||
-          str.includes('redditmedia.com') ||
-          str.includes('redditstatic.com') ||
+          str.includes('netflix.com') ||  // required for Netflix session persistence, profile switching, and DRM
+          str.includes('nflxext.com') ||
+          str.includes('nflxvideo.net') ||
+          str.includes('nflxso.net') ||
+          str.includes('nflx') ||
+          str.includes('disneyplus.com') ||
+          str.includes('crunchyroll.com') ||
           str.includes('twitter.com') ||
           str.includes('x.com') ||
           str.includes('twimg.com') ||
           str.includes('t.co') ||
-          str.includes('netflix.com') ||
-          str.includes('nflx')
+          str.includes('reddit.com') ||
+          str.includes('redditmedia.com') ||
+          str.includes('redditstatic.com')
         );
 
-      if (isExemptDomain(reqUrl) || isExemptDomain(reqInit) || isExemptDomain(reqRef)) {
+      if (
+        isCriticalOrAuth(pageUrl) ||
+        isCriticalOrAuth(frameUrl) ||
+        isCriticalOrAuth(reqInitOrigin) ||
+        isCriticalOrAuth(reqUrl) ||
+        isCriticalOrAuth(reqInit) ||
+        isCriticalOrAuth(reqRef)
+      ) {
         callback({ cancel: false });
         return;
       }
