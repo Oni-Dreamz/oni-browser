@@ -1,6 +1,6 @@
 {
   "name": "oni-browser",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Oni Browser - Sleek, fierce, uncompromised web browser for Windows.",
   "main": "src/main/index.js",
   "author": "Oni Lab",
