@@ -17,8 +17,6 @@ function cleanDist() {
   const files = fs.readdirSync(distDir);
   const removed = [];
 
-  const isDifferentialDisabled = pkg.build && pkg.build.nsis && pkg.build.nsis.differentialPackage === false;
-
   for (const file of files) {
     const isInstaller = /^Oni-Browser-Setup-.*\.exe$/i.test(file);
     const isBlockmap = /^Oni-Browser-Setup-.*\.exe\.blockmap$/i.test(file);
@@ -28,7 +26,7 @@ function cleanDist() {
       fs.unlinkSync(path.join(distDir, file));
       console.log(`[Clean Dist] Removed obsolete installer: ${file}`);
       removed.push(file);
-    } else if (isBlockmap && (isDifferentialDisabled || file !== currentBlockmapName)) {
+    } else if (isBlockmap && file !== currentBlockmapName) {
       fs.unlinkSync(path.join(distDir, file));
       console.log(`[Clean Dist] Removed obsolete blockmap: ${file}`);
       removed.push(file);

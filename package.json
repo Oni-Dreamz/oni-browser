@@ -86,8 +86,7 @@
       "shortcutName": "Oni Browser",
       "uninstallDisplayName": "${productName}",
       "artifactName": "Oni-Browser-Setup-${version}.${ext}",
-      "include": "scripts/installer.nsh",
-      "differentialPackage": false
+      "include": "scripts/installer.nsh"
     },
     "portable": {
       "artifactName": "Oni Browser Standalone.exe"

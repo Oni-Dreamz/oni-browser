@@ -17,11 +17,13 @@ exports.default = async function (context) {
   }
 
   // Sign the packaged binary with castLabs EVS / Google Widevine production VMP AFTER signtool completes
+  console.log(`[afterSign] Signing package with castLabs EVS VMP at ${appOutDir}...`);
   try {
-    console.log(`[afterSign] Signing package with castLabs EVS VMP at ${appOutDir}...`);
     execSync(`python -m castlabs_evs.vmp sign-pkg "${appOutDir}"`, { stdio: 'inherit' });
-    console.log('[afterSign] Successfully applied castLabs Widevine VMP signature.');
+    execSync(`python -m castlabs_evs.vmp verify-pkg "${appOutDir}"`, { stdio: 'inherit' });
+    console.log('[afterSign] Successfully applied and verified castLabs Widevine VMP signature.');
   } catch (e) {
-    console.warn(`[afterSign] castLabs EVS signing notice: ${e.message}`);
+    console.error(`[afterSign] FATAL: castLabs Widevine VMP signing failed: ${e.message}`);
+    throw e;
   }
 };

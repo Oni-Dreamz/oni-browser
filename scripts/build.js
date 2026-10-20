@@ -27,3 +27,14 @@ if (targetArg === '--installer' || targetArg === 'nsis') {
 // Automatically clean older versions after build completes
 const cleanDist = require('./clean-dist.js');
 cleanDist();
+
+// Verify castLabs Widevine VMP signature on packaged app directory
+console.log('[Build] Verifying final Widevine VMP signature...');
+const verifyRes = spawnSync('python', ['-m', 'castlabs_evs.vmp', 'verify-pkg', path.join(__dirname, '../dist/win-unpacked')], {
+  stdio: 'inherit'
+});
+if (verifyRes.status !== 0) {
+  console.error('[Build] FATAL: Final Widevine VMP verification failed!');
+  process.exit(1);
+}
+console.log('[Build] Widevine VMP signature verified successfully.');
