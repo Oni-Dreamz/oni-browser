@@ -253,6 +253,21 @@
 
   let editingApp = null;
 
+  function resetAddAppModalState() {
+    editingApp = null;
+    const winTitle = document.getElementById('os-win-add-app-title');
+    if (winTitle) winTitle.textContent = 'Pin New Home Application';
+    const submitBtn = document.getElementById('os-add-app-submit-btn');
+    if (submitBtn) submitBtn.textContent = 'Pin App';
+    const targetSection = document.getElementById('os-edit-app-target-section');
+    if (targetSection) targetSection.classList.add('hidden');
+    const targetIconEl = document.getElementById('os-edit-app-target-icon');
+    if (targetIconEl) {
+      targetIconEl.src = '';
+      targetIconEl.classList.add('hidden');
+    }
+  }
+
   function openEditAppWindow(app) {
     const winEl = document.getElementById('os-win-add-app');
     if (!winEl || !app) return;
@@ -260,6 +275,31 @@
     bringWindowToFront(winEl);
     winEl.classList.remove('hidden');
     reportModalsState();
+
+    // Distinct Title Header for Editing
+    const winTitle = document.getElementById('os-win-add-app-title');
+    if (winTitle) winTitle.textContent = 'Edit Pinned Application';
+
+    // Submit button text for saving edits
+    const submitBtn = document.getElementById('os-add-app-submit-btn');
+    if (submitBtn) submitBtn.textContent = 'Save Changes';
+
+    // Non-editable Reference Section showing Application Title being edited
+    const targetSection = document.getElementById('os-edit-app-target-section');
+    const targetNameEl = document.getElementById('os-edit-app-target-name');
+    const targetIconEl = document.getElementById('os-edit-app-target-icon');
+    if (targetSection) targetSection.classList.remove('hidden');
+    if (targetNameEl) targetNameEl.textContent = app.title || 'Untitled Application';
+    if (targetIconEl) {
+      const iconSrc = app.icon || app.favicon;
+      if (iconSrc) {
+        targetIconEl.src = iconSrc;
+        targetIconEl.classList.remove('hidden');
+      } else {
+        targetIconEl.src = '';
+        targetIconEl.classList.add('hidden');
+      }
+    }
 
     if (appTitleInput) appTitleInput.value = app.title || '';
     if (appUrlInput) appUrlInput.value = app.url || '';
@@ -273,7 +313,7 @@
       winEl.classList.add('hidden');
     }
     if (winId === 'os-win-add-app') {
-      editingApp = null;
+      resetAddAppModalState();
     }
     reportModalsState();
   }
@@ -284,13 +324,14 @@
       win.classList.add('hidden');
       closedAny = true;
     });
-    editingApp = null;
+    resetAddAppModalState();
     if (closedAny) {
       reportModalsState();
     }
   }
 
   async function setupAddAppWindow(autofill = false) {
+    resetAddAppModalState();
     if (appTitleInput) appTitleInput.value = '';
     if (appUrlInput) appUrlInput.value = '';
     if (appIconInput) appIconInput.value = '';
@@ -585,11 +626,12 @@
   let activeSettingsSection = 'general';
 
   // System Updates State & General Nav Indicator
-  let appVersion = '1.0.3';
+  let appVersion = '1.0.4';
   let updateState = {
     status: 'idle', // 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'error'
     percent: 0,
     downloadedVersion: '',
+    availableVersion: '',
     errorMessage: '',
     checkedOnce: false,
     hasUpdate: false
@@ -627,10 +669,11 @@
     }
     if (state.status === 'available' || state.status === 'downloading') {
       const pct = Math.max(0, Math.min(100, state.percent || 0));
+      const targetVer = state.availableVersion ? `v${escapeHtml(state.availableVersion)}` : 'latest release';
       return `
         <div class="os-update-progress-wrap">
           <div class="os-update-progress-label">
-            <span>Downloading update: ${pct}%</span>
+            <span>Downloading ${targetVer} (Full Setup): ${pct}%</span>
             <span>${pct}%</span>
           </div>
           <div class="os-update-progress-bar-bg">
@@ -640,10 +683,11 @@
       `;
     }
     if (state.status === 'downloaded') {
+      const newVer = state.downloadedVersion ? `v${escapeHtml(state.downloadedVersion)}` : 'Update';
       return `
         <div class="os-update-status-ready">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
-          <span>v${escapeHtml(state.downloadedVersion || 'new version')} ready to install</span>
+          <span>${newVer} ready to install. Restart to upgrade from v${escapeHtml(appVersion)}.</span>
         </div>
       `;
     }
@@ -651,7 +695,10 @@
       return `
         <div class="os-update-status-error">
           <span class="os-update-error-msg" title="${escapeHtml(state.errorMessage)}">${escapeHtml(state.errorMessage || 'Failed to check for updates')}</span>
-          <button type="button" class="os-update-retry-btn" id="os-update-retry-btn">[ Retry ]</button>
+          <div style="display:flex; gap:6px; align-items:center; flex-shrink:0;">
+            <button type="button" class="os-update-retry-btn" id="os-update-retry-btn">[ Retry ]</button>
+            <button type="button" class="os-update-manual-btn" id="os-update-manual-btn" title="Open latest release on GitHub to download standalone or installer directly">[ Download Setup ]</button>
+          </div>
         </div>
       `;
     }
@@ -726,6 +773,15 @@
           triggerUpdateCheck(container);
         });
       }
+      const manualBtn = statusRow.querySelector('#os-update-manual-btn');
+      if (manualBtn) {
+        manualBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (window.oniAPI && window.oniAPI.createTab) {
+            window.oniAPI.createTab('https://github.com/Oni-Dreamz/oni-browser/releases/latest');
+          }
+        });
+      }
     }
   }
 
@@ -775,6 +831,7 @@
     if (!container) return;
     const actionBtn = container.querySelector('#os-update-action-btn');
     const retryBtn = container.querySelector('#os-update-retry-btn');
+    const manualBtn = container.querySelector('#os-update-manual-btn');
 
     if (actionBtn) {
       actionBtn.addEventListener('click', async () => {
@@ -795,6 +852,15 @@
         triggerUpdateCheck(container);
       });
     }
+
+    if (manualBtn) {
+      manualBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (window.oniAPI && window.oniAPI.createTab) {
+          window.oniAPI.createTab('https://github.com/Oni-Dreamz/oni-browser/releases/latest');
+        }
+      });
+    }
   }
 
   // Register updater event listener once
@@ -812,6 +878,7 @@
       } else if (evt === 'update-available' || data.status === 'available') {
         updateState.status = 'downloading';
         updateState.hasUpdate = true;
+        updateState.availableVersion = data.version || (data.info && data.info.version) || '';
         updateState.percent = 0;
         updateState.errorMessage = '';
       } else if (evt === 'update-not-available' || data.status === 'not-available') {
@@ -833,13 +900,11 @@
         updateState.downloadedVersion = data.version || (data.info && data.info.version) || '';
         updateState.errorMessage = '';
       } else if (evt === 'error' || data.status === 'error') {
-        if (data.isManual) {
-          updateState.status = 'error';
-          const cleanMsg = (data.message || 'Error checking for updates')
-            .replace(/^Error invoking remote method '[^']+':\s*/i, '')
-            .replace(/^Error:\s*/i, '');
-          updateState.errorMessage = cleanMsg;
-        }
+        updateState.status = 'error';
+        const cleanMsg = (data.message || 'Error checking for updates')
+          .replace(/^Error invoking remote method '[^']+':\s*/i, '')
+          .replace(/^Error:\s*/i, '');
+        updateState.errorMessage = cleanMsg;
       }
       updateGeneralNavBadge();
       updateDomUpdateCard(settingsBody);
@@ -867,6 +932,10 @@
           updateState.status = 'downloading';
           updateState.hasUpdate = true;
           updateState.percent = st.percent || 0;
+          updateState.availableVersion = st.availableVersion || '';
+        } else if (st.status === 'error') {
+          updateState.status = 'error';
+          updateState.errorMessage = st.errorMessage || '';
         } else if (st.hasUpdate) {
           updateState.hasUpdate = true;
         }
@@ -1082,8 +1151,8 @@
                   <div style="font-weight:600; color:#fff;">Hardware Acceleration</div>
                   <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Use GPU rasterization. Turn off if high-refresh displays or G-Sync experience blackouts (requires restart).</div>
                 </div>
-                <button id="os-set-toggle-hwaccel" class="os-btn-ghost" style="padding:4px 12px; font-size:11px; color:${isHwAccelEnabled ? 'var(--accent-green)' : 'var(--text-muted)'};">
-                  ${isHwAccelEnabled ? 'Active ✓' : 'Disabled'}
+                <button type="button" role="switch" aria-checked="${isHwAccelEnabled}" id="os-set-toggle-hwaccel" class="os-ios-switch ${isHwAccelEnabled ? 'active' : ''}" title="Hardware Acceleration: ${isHwAccelEnabled ? 'Active' : 'Disabled'}">
+                  <span class="os-ios-switch-thumb"></span>
                 </button>
               </div>
             </div>
@@ -1144,8 +1213,8 @@
                   <div style="font-weight:600; color:#fff;">Ad &amp; Tracker Blocker</div>
                   <div style="font-size:11px; color:var(--text-muted);">Neutralized ${blockedCount} invasive requests</div>
                 </div>
-                <button id="os-set-toggle-shield" class="os-btn-ghost" style="padding:4px 12px; font-size:11px; color:${isShieldEnabled ? 'var(--accent-green)' : 'var(--text-muted)'};">
-                  ${isShieldEnabled ? 'Active ✓' : 'Disabled'}
+                <button type="button" role="switch" aria-checked="${isShieldEnabled}" id="os-set-toggle-shield" class="os-ios-switch ${isShieldEnabled ? 'active' : ''}" title="Ad & Tracker Blocker: ${isShieldEnabled ? 'Active' : 'Disabled'}">
+                  <span class="os-ios-switch-thumb"></span>
                 </button>
               </div>
             </div>
@@ -1580,8 +1649,8 @@
           type: 'mouseWheel',
           x: Math.round(e.clientX),
           y: Math.round(e.clientY),
-          deltaX: e.deltaX,
-          deltaY: e.deltaY,
+          deltaX: -Math.round(e.deltaX),
+          deltaY: -Math.round(e.deltaY),
           canScroll: true
         });
       }

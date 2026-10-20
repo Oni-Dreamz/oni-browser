@@ -1375,6 +1375,25 @@ body.html-fullscreen #toolbar {
   box-shadow: 0 0 8px rgba(239, 68, 68, 0.4);
 }
 
+.os-update-manual-btn {
+  background: rgba(var(--accent-rgb, 0, 255, 136), 0.15);
+  border: 1px solid rgba(var(--accent-rgb, 0, 255, 136), 0.45);
+  color: var(--accent-green, #00ff88);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 10.5px;
+  cursor: pointer;
+  font-family: var(--font-mono, monospace);
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+
+.os-update-manual-btn:hover {
+  background: rgba(var(--accent-rgb, 0, 255, 136), 0.28);
+  color: #fff;
+  box-shadow: 0 0 8px rgba(var(--accent-rgb, 0, 255, 136), 0.4);
+}
+
 .os-update-status-uptodate {
   color: var(--text-muted, #94a3b8);
   font-size: 11.5px;

@@ -1373,11 +1373,12 @@
   let activeSettingsSection = 'general';
 
   // System Updates State & General Nav Indicator
-  let appVersion = '1.0.3';
+  let appVersion = '1.0.4';
   let updateState = {
     status: 'idle', // 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'error'
     percent: 0,
     downloadedVersion: '',
+    availableVersion: '',
     errorMessage: '',
     checkedOnce: false,
     hasUpdate: false
@@ -1415,10 +1416,11 @@
     }
     if (state.status === 'available' || state.status === 'downloading') {
       const pct = Math.max(0, Math.min(100, state.percent || 0));
+      const targetVer = state.availableVersion ? `v${escapeHtml(state.availableVersion)}` : 'latest release';
       return `
         <div class="os-update-progress-wrap">
           <div class="os-update-progress-label">
-            <span>Downloading update: ${pct}%</span>
+            <span>Downloading ${targetVer} (Full Setup): ${pct}%</span>
             <span>${pct}%</span>
           </div>
           <div class="os-update-progress-bar-bg">
@@ -1428,10 +1430,11 @@
       `;
     }
     if (state.status === 'downloaded') {
+      const newVer = state.downloadedVersion ? `v${escapeHtml(state.downloadedVersion)}` : 'Update';
       return `
         <div class="os-update-status-ready">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
-          <span>v${escapeHtml(state.downloadedVersion || 'new version')} ready to install</span>
+          <span>${newVer} ready to install. Restart to upgrade from v${escapeHtml(appVersion)}.</span>
         </div>
       `;
     }
@@ -1439,7 +1442,10 @@
       return `
         <div class="os-update-status-error">
           <span class="os-update-error-msg" title="${escapeHtml(state.errorMessage)}">${escapeHtml(state.errorMessage || 'Failed to check for updates')}</span>
-          <button type="button" class="os-update-retry-btn" id="os-update-retry-btn">[ Retry ]</button>
+          <div style="display:flex; gap:6px; align-items:center; flex-shrink:0;">
+            <button type="button" class="os-update-retry-btn" id="os-update-retry-btn">[ Retry ]</button>
+            <button type="button" class="os-update-manual-btn" id="os-update-manual-btn" title="Open latest release on GitHub to download standalone or installer directly">[ Download Setup ]</button>
+          </div>
         </div>
       `;
     }
@@ -1513,6 +1519,15 @@
           triggerUpdateCheck(container);
         });
       }
+      const manualBtn = statusRow.querySelector('#os-update-manual-btn');
+      if (manualBtn) {
+        manualBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (window.oniAPI && window.oniAPI.createTab) {
+            window.oniAPI.createTab('https://github.com/Oni-Dreamz/oni-browser/releases/latest');
+          }
+        });
+      }
     }
   }
 
@@ -1562,6 +1577,7 @@
     if (!container) return;
     const actionBtn = container.querySelector('#os-update-action-btn');
     const retryBtn = container.querySelector('#os-update-retry-btn');
+    const manualBtn = container.querySelector('#os-update-manual-btn');
 
     if (actionBtn) {
       actionBtn.addEventListener('click', async () => {
@@ -1582,6 +1598,15 @@
         triggerUpdateCheck(container);
       });
     }
+
+    if (manualBtn) {
+      manualBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (window.oniAPI && window.oniAPI.createTab) {
+          window.oniAPI.createTab('https://github.com/Oni-Dreamz/oni-browser/releases/latest');
+        }
+      });
+    }
   }
 
   // Register updater event listener once
@@ -1599,6 +1624,7 @@
       } else if (evt === 'update-available' || data.status === 'available') {
         updateState.status = 'downloading';
         updateState.hasUpdate = true;
+        updateState.availableVersion = data.version || (data.info && data.info.version) || '';
         updateState.percent = 0;
         updateState.errorMessage = '';
       } else if (evt === 'update-not-available' || data.status === 'not-available') {
@@ -1619,10 +1645,11 @@
         updateState.downloadedVersion = data.version || (data.info && data.info.version) || '';
         updateState.errorMessage = '';
       } else if (evt === 'error' || data.status === 'error') {
-        if (data.isManual) {
-          updateState.status = 'error';
-          updateState.errorMessage = data.message || 'Error checking for updates';
-        }
+        updateState.status = 'error';
+        const cleanMsg = (data.message || 'Error checking for updates')
+          .replace(/^Error invoking remote method '[^']+':\s*/i, '')
+          .replace(/^Error:\s*/i, '');
+        updateState.errorMessage = cleanMsg;
       }
       updateGeneralNavBadge();
       const b = document.getElementById('os-win-settings-body');
@@ -1651,6 +1678,10 @@
           updateState.status = 'downloading';
           updateState.hasUpdate = true;
           updateState.percent = st.percent || 0;
+          updateState.availableVersion = st.availableVersion || '';
+        } else if (st.status === 'error') {
+          updateState.status = 'error';
+          updateState.errorMessage = st.errorMessage || '';
         } else if (st.hasUpdate) {
           updateState.hasUpdate = true;
         }
@@ -1682,6 +1713,32 @@
 
     const isShieldEnabled = !!(shieldStats && shieldStats.enabled !== false);
     const blockedCount = (shieldStats && shieldStats.totalBlocked) || 0;
+    const isHwAccelEnabled = !settings || settings.hardwareAcceleration !== false;
+
+    if (updater && updater.getUpdateStatus) {
+      updater.getUpdateStatus().then(st => {
+        if (st) {
+          if (st.status === 'downloaded') {
+            updateState.status = 'downloaded';
+            updateState.hasUpdate = true;
+            updateState.downloadedVersion = st.downloadedVersion || '';
+          } else if (st.status === 'downloading' || st.status === 'available') {
+            updateState.status = 'downloading';
+            updateState.hasUpdate = true;
+            updateState.percent = st.percent || 0;
+            updateState.availableVersion = st.availableVersion || '';
+          } else if (st.status === 'error') {
+            updateState.status = 'error';
+            updateState.errorMessage = st.errorMessage || '';
+          } else if (st.hasUpdate) {
+            updateState.hasUpdate = true;
+          }
+          updateGeneralNavBadge();
+          const b = document.getElementById('os-win-settings-body');
+          if (b) updateDomUpdateCard(b);
+        }
+      }).catch(() => {});
+    }
 
     let themesHtml = '';
     (themes || []).forEach(t => {
@@ -1856,6 +1913,19 @@
                 ${enginesHtml}
               </div>
             </div>
+
+            <div style="margin-top: 18px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.08);">
+              <div class="os-settings-group-label">System &amp; Hardware Acceleration</div>
+              <div class="os-list-row" style="cursor:default; margin-bottom:0;">
+                <div>
+                  <div style="font-weight:600; color:#fff;">Hardware Acceleration</div>
+                  <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Use GPU rasterization. Turn off if high-refresh displays or G-Sync experience blackouts (requires restart).</div>
+                </div>
+                <button type="button" role="switch" aria-checked="${isHwAccelEnabled}" id="os-set-toggle-hwaccel" class="os-ios-switch ${isHwAccelEnabled ? 'active' : ''}" title="Hardware Acceleration: ${isHwAccelEnabled ? 'Active' : 'Disabled'}">
+                  <span class="os-ios-switch-thumb"></span>
+                </button>
+              </div>
+            </div>
           </div>
 
           <!-- Section 2: Customization (Order: Theme -> Accent Color -> Wallpaper) -->
@@ -1913,8 +1983,8 @@
                   <div style="font-weight:600; color:#fff;">Ad &amp; Tracker Blocker</div>
                   <div style="font-size:11px; color:var(--text-muted);">Neutralized ${blockedCount} invasive requests</div>
                 </div>
-                <button id="os-set-toggle-shield" class="os-btn-ghost" style="padding:4px 12px; font-size:11px; color:${isShieldEnabled ? 'var(--accent-green)' : 'var(--text-muted)'};">
-                  ${isShieldEnabled ? 'Active ✓' : 'Disabled'}
+                <button type="button" role="switch" aria-checked="${isShieldEnabled}" id="os-set-toggle-shield" class="os-ios-switch ${isShieldEnabled ? 'active' : ''}" title="Ad & Tracker Blocker: ${isShieldEnabled ? 'Active' : 'Disabled'}">
+                  <span class="os-ios-switch-thumb"></span>
                 </button>
               </div>
             </div>
@@ -2036,6 +2106,17 @@
         }
       });
     });
+
+    const hwAccelToggleBtn = body.querySelector('#os-set-toggle-hwaccel');
+    if (hwAccelToggleBtn) {
+      hwAccelToggleBtn.addEventListener('click', async () => {
+        const next = !isHwAccelEnabled;
+        if (window.oniAPI && window.oniAPI.updateSettings) {
+          await window.oniAPI.updateSettings({ hardwareAcceleration: next });
+          await renderOsSettingsWindow();
+        }
+      });
+    }
 
     const shieldToggle = document.getElementById('os-set-toggle-shield');
     if (shieldToggle) {

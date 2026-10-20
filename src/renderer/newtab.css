@@ -2071,4 +2071,73 @@ body[data-layout="desktop"] {
   color: var(--accent-green);
 }
 
+.os-update-manual-btn {
+  background: rgba(var(--accent-rgb), 0.15);
+  border: 1px solid rgba(var(--accent-rgb), 0.45);
+  color: var(--accent-green);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 10.5px;
+  cursor: pointer;
+  font-family: var(--font-mono, monospace);
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+
+.os-update-manual-btn:hover {
+  background: rgba(var(--accent-rgb), 0.28);
+  color: #fff;
+  box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.4);
+}
+
+/* iOS-Styled Toggle Switch (Oni Aesthetic) */
+.os-ios-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 44px;
+  height: 24px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 9999px;
+  cursor: pointer;
+  outline: none;
+  padding: 2px;
+  transition: background-color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+
+.os-ios-switch:hover {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.os-ios-switch.active {
+  background: var(--accent-green, #00ff88);
+  border-color: var(--accent-green, #00ff88);
+  box-shadow: 0 0 12px rgba(var(--accent-rgb, 0, 255, 136), 0.45);
+}
+
+.os-ios-switch-thumb {
+  display: block;
+  width: 18px;
+  height: 18px;
+  background: #ffffff;
+  border-radius: 50%;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.45);
+  transform: translateX(0);
+  transition: transform 0.25s cubic-bezier(0.2, 0.85, 0.32, 1.2), background-color 0.2s ease;
+  pointer-events: none;
+}
+
+.os-ios-switch.active .os-ios-switch-thumb {
+  transform: translateX(20px);
+  background: #ffffff;
+}
+
+.os-ios-switch:focus-visible {
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb, 0, 255, 136), 0.5);
+}
+
 

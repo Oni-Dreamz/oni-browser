@@ -370,8 +370,21 @@ function sendToChromeAndDock(channel, payload) {
   }
 }
 
+// Global process safety handlers to prevent unhandled background rejections or updater errors from crashing the browser
+process.on('unhandledRejection', (reason) => {
+  console.warn('[Process] Unhandled Promise Rejection (safely caught):', reason?.message || reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[Process] Uncaught Exception (safely caught):', err?.message || err);
+});
+
 // electron-updater configuration, background service & event forwarding
 autoUpdater.autoDownload = true;
+// Mandatory: Disable differential blockmap downloads so users who miss in-between versions (e.g. 1.0.2 -> 1.0.4+)
+// always download the full, reliable setup installer without blockmap 404s, corrupt diffs, or updater crashes.
+autoUpdater.disableDifferentialDownload = true;
+autoUpdater.disableWebInstaller = true;
+autoUpdater.autoInstallOnAppQuit = false;
 autoUpdater.logger = {
   info: (msg) => console.log('[AutoUpdater]', msg),
   warn: (msg) => console.warn('[AutoUpdater]', msg),
@@ -494,18 +507,15 @@ autoUpdater.on('error', (err) => {
   const cleanMsg = (err?.message || String(err || 'Error checking for updates'))
     .replace(/^Error invoking remote method '[^']+':\s*/i, '')
     .replace(/^Error:\s*/i, '');
-  if (isManualUpdateCheck) {
-    currentUpdateState.status = 'error';
-    currentUpdateState.errorMessage = cleanMsg;
-    broadcastUpdaterEvent({
-      event: 'error',
-      status: 'error',
-      message: cleanMsg,
-      isManual: true
-    });
-  } else {
-    console.log('[AutoUpdater] Background check note:', cleanMsg);
-  }
+  currentUpdateState.status = 'error';
+  currentUpdateState.errorMessage = cleanMsg;
+  broadcastUpdaterEvent({
+    event: 'error',
+    status: 'error',
+    message: cleanMsg,
+    isManual: isManualUpdateCheck
+  });
+  console.warn('[AutoUpdater] Update error note:', cleanMsg);
 });
 
 async function checkForUpdatesInternal(isManual = false) {
@@ -594,6 +604,13 @@ async function checkForUpdatesInternal(isManual = false) {
 
   try {
     const res = await autoUpdater.checkForUpdates();
+    // CRITICAL: Attach rejection handler to downloadPromise so unhandled promise rejections
+    // during background download never crash the entire Electron process.
+    if (res && res.downloadPromise) {
+      res.downloadPromise.catch((dErr) => {
+        console.warn('[AutoUpdater] Download promise error handled safely:', dErr?.message || dErr);
+      });
+    }
     isCheckingForUpdates = false;
     return {
       status: 'success',
@@ -604,21 +621,21 @@ async function checkForUpdatesInternal(isManual = false) {
     const cleanMsg = (err?.message || 'Update check failed')
       .replace(/^Error invoking remote method '[^']+':\s*/i, '')
       .replace(/^Error:\s*/i, '');
+    currentUpdateState.status = 'error';
+    currentUpdateState.errorMessage = cleanMsg;
+    broadcastUpdaterEvent({
+      event: 'error',
+      status: 'error',
+      message: cleanMsg,
+      isManual: !!isManual
+    });
     if (isManual) {
-      currentUpdateState.status = 'error';
-      currentUpdateState.errorMessage = cleanMsg;
-      broadcastUpdaterEvent({
-        event: 'error',
-        status: 'error',
-        message: cleanMsg,
-        isManual: true
-      });
       return {
         status: 'error',
         message: cleanMsg
       };
     } else {
-      console.log('[AutoUpdater] Background check skipped/offline:', cleanMsg);
+      console.log('[AutoUpdater] Background check skipped/error:', cleanMsg);
       return { status: 'offline' };
     }
   }
@@ -1988,9 +2005,10 @@ ipcMain.handle('get-update-status', () => {
 
 ipcMain.handle('install-update', () => {
   try {
-    return autoUpdater.quitAndInstall();
+    stopBackgroundUpdateService();
+    return autoUpdater.quitAndInstall(false, true);
   } catch (err) {
-    console.warn('[AutoUpdater] Install error:', err.message);
+    console.warn('[AutoUpdater] Install error:', err?.message || err);
   }
 });
 
