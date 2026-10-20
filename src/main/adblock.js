@@ -16,7 +16,6 @@ const BLOCK_PATTERNS = [
   '*://*.criteo.net/*',
   '*://*.outbrain.com/*',
   '*://*.taboola.com/*',
-  '*://*.amazon-adsystem.com/*',
   '*://*.adsrvr.org/*',
   '*://*.rubiconproject.com/*',
   '*://*.pubmatic.com/*',
@@ -65,6 +64,30 @@ class OniShield {
         return;
       }
 
+      // Exempt domains and CDNs from adblocking to avoid breaking authentication, virtualized lists (e.g. Twitch directory streams), or DRM video playback
+      const isExemptDomain = (str) =>
+        str && (
+          str.includes('twitch.tv') ||
+          str.includes('ttvnw.net') ||
+          str.includes('jtvnw.net') ||
+          str.includes('amazon-adsystem.com') ||
+          str.includes('media-amazon.com') ||
+          str.includes('reddit.com') ||
+          str.includes('redditmedia.com') ||
+          str.includes('redditstatic.com') ||
+          str.includes('twitter.com') ||
+          str.includes('x.com') ||
+          str.includes('twimg.com') ||
+          str.includes('t.co') ||
+          str.includes('netflix.com') ||
+          str.includes('nflx')
+        );
+
+      if (isExemptDomain(reqUrl) || isExemptDomain(reqInit) || isExemptDomain(reqRef)) {
+        callback({ cancel: false });
+        return;
+      }
+
       // Never block Cloudflare Turnstile, Twitch/Reddit OAuth, or security challenge endpoints
       if (
         reqUrl.includes('/cdn-cgi/') ||
@@ -75,9 +98,7 @@ class OniShield {
         reqUrl.includes('reddit.com/account') ||
         reqUrl.includes('oauth') ||
         reqUrl.includes('openid') ||
-        reqUrl.includes('/recaptcha/') ||
-        reqInit.includes('twitch.tv') ||
-        reqInit.includes('reddit.com')
+        reqUrl.includes('/recaptcha/')
       ) {
         callback({ cancel: false });
         return;

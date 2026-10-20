@@ -18,6 +18,8 @@
     "appId": "com.onilab.onibrowser",
     "productName": "Oni Browser",
     "copyright": "Copyright © 2026 Oni Lab",
+    "afterPack": "scripts/afterPack.js",
+    "afterSign": "scripts/afterSign.js",
     "afterAllArtifactBuild": "scripts/clean-dist.js",
     "directories": {
       "output": "dist"

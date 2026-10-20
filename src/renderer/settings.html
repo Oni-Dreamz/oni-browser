@@ -182,15 +182,15 @@
 
     <div class="setting-group" style="padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.06);">
       <div class="setting-label">System & Hardware Acceleration</div>
-      <div class="setting-desc">Accelerate web rendering with GPU rasterization when available.</div>
+      <div class="setting-desc">Accelerate web rendering with GPU rasterization when available. Turn off if high-refresh rate displays or G-Sync experience blackouts (requires restart).</div>
       <label class="switch">
-        <input type="checkbox" checked disabled>
+        <input type="checkbox" id="setting-hardware-accel">
         <span class="slider round"></span>
       </label>
     </div>
 
     <div class="setting-group" style="margin-top: 30px; padding: 20px; background: rgba(0,255,136,0.06); border: 1px solid rgba(0,255,136,0.2); border-radius: 12px;">
-      <div id="settings-about-version" style="font-weight: 700; color: #fff; margin-bottom: 4px;">Oni Browser v1.0.3 (Windows Standalone x64)</div>
+      <div id="settings-about-version" style="font-weight: 700; color: #fff; margin-bottom: 4px;">Oni Browser v1.0.4 (Windows Standalone x64)</div>
       <div style="font-size: 12px; color: var(--text-muted);">Engine: Chromium & Electron 44 • Standalone Portable Edition</div>
     </div>
   </div>
@@ -206,6 +206,7 @@
       const engineSelect = document.getElementById('setting-engine');
       const bmBarToggle = document.getElementById('setting-bm-bar');
       const shieldToggle = document.getElementById('setting-shield');
+      const hwAccelToggle = document.getElementById('setting-hardware-accel');
       const btnSetDefaultBrowser = document.getElementById('btn-set-default-browser');
       const descDefaultBrowser = document.getElementById('setting-default-browser-desc');
 
@@ -259,6 +260,7 @@
         engineSelect.value = settings.searchEngine || 'duckduckgo';
         bmBarToggle.checked = settings.showBookmarksBar !== false;
         shieldToggle.checked = settings.adBlockEnabled !== false;
+        if (hwAccelToggle) hwAccelToggle.checked = settings.hardwareAcceleration !== false;
 
         const sortedThemes = [...(themes || [])].sort((a, b) => {
           if (a.id === 'oni-os') return -1;
@@ -334,6 +336,12 @@
         window.oniAPI.updateSettings({ adBlockEnabled: e.target.checked });
         window.oniAPI.toggleShield(e.target.checked);
       });
+
+      if (hwAccelToggle) {
+        hwAccelToggle.addEventListener('change', (e) => {
+          window.oniAPI.updateSettings({ hardwareAcceleration: e.target.checked });
+        });
+      }
 
       const clearDataBtn = document.getElementById('page-btn-clear-data');
       if (clearDataBtn) {

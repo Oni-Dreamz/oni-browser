@@ -125,6 +125,36 @@
     }, 60);
   }
 
+  function updateAddAppModalFromActiveTab() {
+    const winEl = document.getElementById('os-win-add-app');
+    if (!winEl || winEl.classList.contains('hidden')) return;
+
+    let currentUrl = '';
+    let currentTitle = '';
+    let currentIcon = '';
+
+    const current = tabs.find(t => t.isActive || t.id === activeTabId);
+    if (current) {
+      currentUrl = current.url || '';
+      currentTitle = current.title || '';
+      currentIcon = current.favicon || '';
+    } else if (activeTabUrl) {
+      currentUrl = activeTabUrl;
+    }
+
+    const isHome = !currentUrl || currentUrl === 'oni://home' || currentUrl === 'oni://newtab' || currentUrl.startsWith('oni://');
+    if (isHome) {
+      if (appTitleInput) appTitleInput.value = '';
+      if (appUrlInput) appUrlInput.value = '';
+      if (appIconInput) appIconInput.value = '';
+      return;
+    }
+
+    if (appTitleInput) appTitleInput.value = currentTitle || '';
+    if (appUrlInput) appUrlInput.value = currentUrl;
+    if (appIconInput) appIconInput.value = currentIcon || '';
+  }
+
   function renderSpotlightResults(query) {
     if (!spotlightResults) return;
     spotlightResults.innerHTML = '';
@@ -869,6 +899,7 @@
 
     const isShieldEnabled = !!(shieldStats && shieldStats.enabled !== false);
     const blockedCount = (shieldStats && shieldStats.totalBlocked) || 0;
+    const isHwAccelEnabled = !settings || settings.hardwareAcceleration !== false;
 
     let themesHtml = '';
     (themes || []).forEach(t => {
@@ -1043,6 +1074,19 @@
                 ${enginesHtml}
               </div>
             </div>
+
+            <div style="margin-top: 18px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.08);">
+              <div class="os-settings-group-label">System &amp; Hardware Acceleration</div>
+              <div class="os-list-row" style="cursor:default; margin-bottom:0;">
+                <div>
+                  <div style="font-weight:600; color:#fff;">Hardware Acceleration</div>
+                  <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Use GPU rasterization. Turn off if high-refresh displays or G-Sync experience blackouts (requires restart).</div>
+                </div>
+                <button id="os-set-toggle-hwaccel" class="os-btn-ghost" style="padding:4px 12px; font-size:11px; color:${isHwAccelEnabled ? 'var(--accent-green)' : 'var(--text-muted)'};">
+                  ${isHwAccelEnabled ? 'Active ✓' : 'Disabled'}
+                </button>
+              </div>
+            </div>
           </div>
 
           <!-- Section 2: Customization (Order: Theme -> Accent Color -> Wallpaper) -->
@@ -1135,6 +1179,17 @@
         });
       });
     });
+
+    const hwAccelToggleBtn = settingsBody.querySelector('#os-set-toggle-hwaccel');
+    if (hwAccelToggleBtn) {
+      hwAccelToggleBtn.addEventListener('click', async () => {
+        const next = !isHwAccelEnabled;
+        if (window.oniAPI && window.oniAPI.updateSettings) {
+          await window.oniAPI.updateSettings({ hardwareAcceleration: next });
+          renderOsSettingsWindow();
+        }
+      });
+    }
 
     settingsBody.querySelectorAll('.os-theme-apply-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
@@ -1237,9 +1292,15 @@
     const clearDataBtn = document.getElementById('os-set-btn-clear-data');
     if (clearDataBtn) {
       clearDataBtn.addEventListener('click', async () => {
-        if (confirm('Clear all browsing history, cache, and downloads?')) {
+        if (confirm('Clear all browsing history, cache, cookies, and local site storage?')) {
           if (window.oniAPI && window.oniAPI.clearBrowsingData) {
-            await window.oniAPI.clearBrowsingData({ history: true, cache: true, downloads: true });
+            await window.oniAPI.clearBrowsingData({
+              history: true,
+              cookies: true,
+              cache: true,
+              storage: true,
+              downloads: true
+            });
             renderOsSettingsWindow();
           }
         }
@@ -1571,20 +1632,30 @@
               activeTabUrl = tab.url || '';
               tabs.forEach(t => { t.isActive = (t.id === tab.id); });
               updateSpotlightUrlFromActiveTab();
+              updateAddAppModalFromActiveTab();
             }
           });
         }
 
         if (window.oniAPI.onTabSwitched) {
-          window.oniAPI.onTabSwitched((tabId) => {
+          window.oniAPI.onTabSwitched(async (tabId) => {
             const id = (tabId && typeof tabId === 'object') ? tabId.id : tabId;
             activeTabId = id;
+            try {
+              if (window.oniAPI && window.oniAPI.getTabs) {
+                const freshTabs = await window.oniAPI.getTabs();
+                if (Array.isArray(freshTabs)) {
+                  tabs = freshTabs;
+                }
+              }
+            } catch (e) {}
             tabs.forEach(t => { t.isActive = (t.id === id); });
             const current = tabs.find(t => t.id === id);
             if (current) {
               activeTabUrl = current.url || '';
             }
             updateSpotlightUrlFromActiveTab();
+            updateAddAppModalFromActiveTab();
           });
         }
 
@@ -1602,9 +1673,11 @@
               activeTabUrl = tabData.url || '';
               tabs.forEach(t => { t.isActive = (t.id === tabData.id); });
               updateSpotlightUrlFromActiveTab();
+              updateAddAppModalFromActiveTab();
             } else if (tabData.id === activeTabId) {
               activeTabUrl = tabData.url || '';
               updateSpotlightUrlFromActiveTab();
+              updateAddAppModalFromActiveTab();
             }
           });
         }

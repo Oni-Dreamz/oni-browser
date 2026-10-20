@@ -12,3 +12,8 @@
   - `scripts/clean-dist.js` automates the removal of any non-current versions.
   - `package.json` configures `"afterAllArtifactBuild": "scripts/clean-dist.js"` so electron-builder executes this cleanup automatically.
   - Build scripts in `package.json` (`npm run build`, `npm run build:installer`, `npm run build:portable`, `npm run build:all`) invoke `scripts/build.js` which always verifies cleanup.
+
+## DRM & Widevine VMP Signing (Mandatory for Netflix / Premium Streaming)
+- **Verified Media Path (VMP) Enforcement**: Premium streaming services (specifically Netflix) mandate Google Widevine Level 3 VMP. Unsigned or development-only binaries will successfully download manifests, negotiate licenses, and buffer media, but will silently freeze with `Total Frames: 0`, `Rendering state: Waiting for decoder`, and fail with **Error Code E100**.
+- **Automated VMP Signing in `afterSign`**: All production packages built by `electron-builder` must be signed via `castlabs-evs` (`python -m castlabs_evs.vmp sign-pkg "<appOutDir>"`), configured in [`scripts/afterSign.js`](file:///o:/Oni%20Lab/Oni%20Browser/scripts/afterSign.js) (and [`scripts/afterPack.js`](file:///o:/Oni%20Lab/Oni%20Browser/scripts/afterPack.js)) so the VMP signature is applied after Windows `signtool.exe` completes.
+- **Verification Rule**: Never release or test packaged binaries for streaming DRM without running `python -m castlabs_evs.vmp verify-pkg "<appOutDir>"` to guarantee the signature reports `Signature is valid: streaming`.

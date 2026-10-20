@@ -5,22 +5,42 @@ const fs = require('fs');
 const store = require('./store');
 const oniShield = require('./adblock');
 
+// Check hardware acceleration preference or --disable-gpu flag
+try {
+  const userSettings = store.getSettings();
+  if (process.argv.includes('--disable-gpu') || (userSettings && userSettings.hardwareAcceleration === false)) {
+    app.disableHardwareAcceleration();
+  }
+} catch (e) {}
+
 // Disable Blink automation features so navigator.webdriver is not flagged by Turnstile/Cloudflare/anti-bot systems
 app.commandLine.appendSwitch('disable-blink-features', 'AutomationControlled');
+// Disable CDM cryptographic verification so Widevine DRM plays smoothly without M7111-1957-205064
+app.commandLine.appendSwitch('no-verify-widevine-cdm');
+// Disable DirectComposition video overlays to prevent Windows DWM & NVIDIA G-Sync from resetting display output or blanking monitor
+app.commandLine.appendSwitch('disable-direct-composition-video-overlays');
+// Disable GPU VSync and frame throttling to prevent windowed G-Sync and VRR from hooking the presentation pipe
+app.commandLine.appendSwitch('disable-gpu-vsync');
+app.commandLine.appendSwitch('disable-frame-throttle');
+// Disable hardware secure DRM and Media Foundation PMP/HDCP to prevent Windows display mode renegotiation (allow standard decoders & DComp presentation)
+app.commandLine.appendSwitch(
+  'disable-features',
+  'VariableRefreshRate,HardwareSecureDecryption,HardwareSecureDecryptionExperiment,MediaFoundationHardwareSecurity,MediaFoundationCdm,BlockThirdPartyCookies'
+);
 // Enable media & hardware video acceleration features for DRM and 4K/1080p playback
 app.commandLine.appendSwitch('enable-features', 'PlatformHEVCDecoderSupport');
 
 // Standard authentic Google Chrome User-Agent and Client Hints (matching desktop Chrome 131)
-const STABLE_CHROME_VERSION = '131.0.0.0';
-const chromeMajor = '131';
+const STABLE_CHROME_VERSION = '132.0.6834.160';
+const chromeMajor = '132';
 const cleanUA = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${STABLE_CHROME_VERSION} Safari/537.36`;
 const desktopChromeUa = cleanUA;
-const standardSecChUa = `"Chromium";v="${chromeMajor}", "Not_A Brand";v="24", "Google Chrome";v="${chromeMajor}"`;
+const standardSecChUa = `"Not A(Brand";v="8", "Chromium";v="${chromeMajor}", "Google Chrome";v="${chromeMajor}"`;
 
 // Set authentic Google Chrome User-Agent globally for all renderers, workers, iframes and network requests
 app.userAgentFallback = cleanUA;
 
-// Reusable helper function to configure clean User-Agent and authentic Client Hints across sessions
+// Reusable helper function to configure clean User-Agent across sessions without breaking CORS preflights or Client Hints
 function configureSessionHeaders(targetSession) {
   if (!targetSession) return;
   try {
@@ -29,39 +49,38 @@ function configureSessionHeaders(targetSession) {
 
   try {
     targetSession.webRequest.onBeforeSendHeaders((details, callback) => {
-      const requestHeaders = details.requestHeaders || {};
-
-      // Ensure clean User-Agent without Electron or application branding
-      requestHeaders['User-Agent'] = cleanUA;
-      if (requestHeaders['user-agent']) {
-        requestHeaders['user-agent'] = cleanUA;
+      // Never mutate headers on CORS preflight OPTIONS requests
+      if (details.method === 'OPTIONS') {
+        callback({});
+        return;
       }
 
-      // Ensure exact authentic Google Chrome Client Hints
-      requestHeaders['Sec-CH-UA'] = standardSecChUa;
-      requestHeaders['Sec-CH-UA-Mobile'] = '?0';
-      requestHeaders['Sec-CH-UA-Platform'] = '"Windows"';
+      const requestHeaders = details.requestHeaders || {};
+      let modified = false;
 
-      // Purge any headers leaking Electron, custom branding, or lowercase variants
+      // Ensure clean User-Agent without Electron or application branding
+      if (requestHeaders['User-Agent'] && /Electron|OniBrowser/i.test(requestHeaders['User-Agent'])) {
+        requestHeaders['User-Agent'] = requestHeaders['User-Agent'].replace(/\s*Electron\/\S+/g, '').replace(/\s*OniBrowser\/\S+/g, '');
+        modified = true;
+      }
+      if (requestHeaders['user-agent'] && /Electron|OniBrowser/i.test(requestHeaders['user-agent'])) {
+        requestHeaders['user-agent'] = requestHeaders['user-agent'].replace(/\s*Electron\/\S+/g, '').replace(/\s*OniBrowser\/\S+/g, '');
+        modified = true;
+      }
+
+      // Purge any headers accidentally leaking internal Oni branding
       for (const key of Object.keys(requestHeaders)) {
-        const lower = key.toLowerCase();
-        if (
-          lower.includes('electron') ||
-          lower.includes('oni-browser') ||
-          lower === 'sec-ch-ua' ||
-          lower === 'sec-ch-ua-mobile' ||
-          lower === 'sec-ch-ua-platform'
-        ) {
+        if (key.toLowerCase().includes('oni-browser')) {
           delete requestHeaders[key];
+          modified = true;
         }
       }
 
-      // Re-apply capitalized canonical headers
-      requestHeaders['Sec-CH-UA'] = standardSecChUa;
-      requestHeaders['Sec-CH-UA-Mobile'] = '?0';
-      requestHeaders['Sec-CH-UA-Platform'] = '"Windows"';
-
-      callback({ requestHeaders });
+      if (modified) {
+        callback({ requestHeaders });
+      } else {
+        callback({});
+      }
     });
   } catch (e) {
     console.warn('[Session] Failed to attach onBeforeSendHeaders:', e.message);
@@ -1894,20 +1913,7 @@ app.whenReady().then(async () => {
     configureSessionHeaders(sess);
   });
 
-  // Wipe tainted Google cookies & storage data on startup (e.g. persistent __Host-GAPS cookie from prior blocked logins)
-  try {
-    await session.defaultSession.clearStorageData({
-      origin: 'https://accounts.google.com',
-      storages: ['cookies', 'localstorage', 'indexdb', 'websql', 'serviceworkers', 'cachestorage']
-    });
-    await session.defaultSession.clearStorageData({
-      origin: 'https://www.google.com',
-      storages: ['cookies', 'localstorage', 'indexdb', 'websql', 'serviceworkers', 'cachestorage']
-    });
-    console.log('[Auth] Cleared potentially tainted Google session & cookie state on startup.');
-  } catch (err) {
-    console.warn('[Auth] Error clearing Google storage data on startup:', err.message);
-  }
+// Preserved Google session & auth storage state on startup.
 
   createWindow();
 
@@ -2233,13 +2239,19 @@ ipcMain.handle('privacy:clearData', async (event, options = {}) => {
   const storagesToClear = [];
   if (cookies) storagesToClear.push('cookies');
   if (storage) {
-    storagesToClear.push('localstorage', 'indexdb', 'websql', 'serviceworkers', 'cachestorage');
+    storagesToClear.push('localstorage', 'indexdb', 'websql', 'serviceworkers', 'cachestorage', 'filesystem');
   }
   if (cache) {
     storagesToClear.push('shadercache');
   }
 
-  if (storagesToClear.length > 0) {
+  if ((cookies && storage && cache) || (cookies && storage)) {
+    try {
+      await ses.clearStorageData();
+    } catch (e) {
+      console.error('Failed clearing all storage data:', e);
+    }
+  } else if (storagesToClear.length > 0) {
     try {
       await ses.clearStorageData({
         storages: storagesToClear
@@ -2247,6 +2259,24 @@ ipcMain.handle('privacy:clearData', async (event, options = {}) => {
     } catch (e) {
       console.error('Failed clearing storage data:', e);
     }
+  }
+
+  if (storage) {
+    try {
+      const userDataDir = app.getPath('userData');
+      const dirsToPurge = ['IndexedDB', 'Service Worker', 'Session Storage'];
+      for (const dirName of dirsToPurge) {
+        const dirPath = path.join(userDataDir, dirName);
+        if (fs.existsSync(dirPath)) {
+          const items = fs.readdirSync(dirPath);
+          for (const item of items) {
+            try {
+              fs.rmSync(path.join(dirPath, item), { recursive: true, force: true });
+            } catch (_) {}
+          }
+        }
+      }
+    } catch (e) {}
   }
 
   if (history) {

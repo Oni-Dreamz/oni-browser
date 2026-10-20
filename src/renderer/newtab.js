@@ -2051,9 +2051,15 @@
     const clearDataBtn = document.getElementById('os-set-btn-clear-data');
     if (clearDataBtn) {
       clearDataBtn.addEventListener('click', async () => {
-        if (confirm('Clear all browsing history, cache, and downloads?')) {
+        if (confirm('Clear all browsing history, cache, cookies, and local site storage?')) {
           if (window.oniAPI && window.oniAPI.clearBrowsingData) {
-            await window.oniAPI.clearBrowsingData({ history: true, cache: true, downloads: true });
+            await window.oniAPI.clearBrowsingData({
+              history: true,
+              cookies: true,
+              cache: true,
+              storage: true,
+              downloads: true
+            });
             await renderOsSettingsWindow();
           }
         }
