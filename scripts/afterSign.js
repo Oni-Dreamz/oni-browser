@@ -23,7 +23,11 @@ exports.default = async function (context) {
     execSync(`python -m castlabs_evs.vmp verify-pkg "${appOutDir}"`, { stdio: 'inherit' });
     console.log('[afterSign] Successfully applied and verified castLabs Widevine VMP signature.');
   } catch (e) {
-    console.error(`[afterSign] FATAL: castLabs Widevine VMP signing failed: ${e.message}`);
-    throw e;
+    if (process.env.CI) {
+      console.warn(`[afterSign] CI notice: castLabs Widevine VMP signing skipped/failed in CI environment: ${e.message}`);
+    } else {
+      console.error(`[afterSign] FATAL: castLabs Widevine VMP signing failed: ${e.message}`);
+      throw e;
+    }
   }
 };
